@@ -455,9 +455,9 @@ td.sc{white-space:normal;max-width:160px;font-size:11px;line-height:1.5;}
       <div class="dh-pill" id="dh-pill">0</div>
     </div>
     <div class="exp-row">
-      <button class="exp-btn" id="exp-csv-btn">Download CSV</button>
-      <button class="exp-btn" id="exp-rpt-btn">Full Report</button>
-      <button class="exp-btn" id="exp-ref-btn">Refresh</button>
+      <button class="exp-btn" id="exp-xlsx-btn">&#x2B07; XLSX</button>
+      <button class="exp-btn" id="exp-pdf-btn">&#x2B07; PDF Report</button>
+      <button class="exp-btn" id="exp-ref-btn">&#x1F504; Refresh</button>
     </div>
   </div>
   <div class="dash-body" id="dash-body"></div>
@@ -526,8 +526,8 @@ function init(){
   document.getElementById('sp-confirm-eye').addEventListener('click',function(){togglePw('sp-confirm',this);});
   document.getElementById('sp-new').addEventListener('input',function(){renderStr(this.value,'sp-str');});
   document.getElementById('sa-back-btn').addEventListener('click',function(){show('sc-ch-login');});
-  document.getElementById('exp-csv-btn').addEventListener('click',exportCSV);
-  document.getElementById('exp-rpt-btn').addEventListener('click',exportReport);
+  document.getElementById('exp-xlsx-btn').addEventListener('click',exportXLSX);
+  document.getElementById('exp-pdf-btn').addEventListener('click',function(){exportPDF(null,null);});
   document.getElementById('exp-ref-btn').addEventListener('click',refreshDash);
   document.getElementById('sg1').addEventListener('input',function(){charCt(this,'cc1');chkSug();});
   document.getElementById('sg2').addEventListener('input',function(){charCt(this,'cc2');});
@@ -869,15 +869,39 @@ function buildAnalysis(){
     var ai=G.subs.reduce(function(s,d){return s+(parseFloat(d.importance[f.id])||0);},0)/G.subs.length;
     var as2=G.subs.reduce(function(s,d){return s+(d.scores[f.id]||0);},0)/G.subs.length;
     return{id:f.id,label:f.label,icon:f.icon,avgImp:ai,avgScr:as2,scorePct:(as2/10)*100,gap:ai-(as2/10)*100};
-  }).sort(function(a,b){return b.gap-a.gap;});
+  }).sort(function(a,b){
+    // Primary: Importance DESC. Secondary: Gap DESC (attention needed)
+    if(Math.abs(b.avgImp-a.avgImp)>1) return b.avgImp-a.avgImp;
+    return b.gap-a.gap;
+  });
 }
 
 function appendAnalysisCard(body){
   var card=document.createElement('div');card.className='card';
   var h=document.createElement('div');h.className='sec-title';h.textContent='Priority Analysis';
   var t=document.createElement('div');t.className='card-title';t.style.marginBottom='4px';t.textContent='Where Attention Is Needed';
-  var d=document.createElement('div');d.className='card-body';d.style.marginBottom='16px';d.textContent='Gap = Avg Importance - Score. Higher gap = more urgent.';
-  card.appendChild(h);card.appendChild(t);card.appendChild(d);
+  card.appendChild(h);card.appendChild(t);
+  // Metric legend
+  var leg=document.createElement('div');
+  leg.style.cssText='background:#EEF4FC;border-radius:12px;padding:14px 16px;margin-bottom:16px;';
+  var legTitle=document.createElement('div');legTitle.style.cssText='font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--nv);opacity:.6;margin-bottom:10px;';legTitle.textContent='METRIC GUIDE';
+  leg.appendChild(legTitle);
+  [{icon:'📊',lbl:'Importance %',desc:'How much tablers value this area'},
+   {icon:'⭐',lbl:'Score /10',desc:'Current performance (tablers\u2019 rating)'},
+   {icon:'⚡',lbl:'Gap %',desc:'Importance minus performance. Over 10% = needs attention'}
+  ].forEach(function(m){
+    var row=document.createElement('div');row.style.cssText='display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--tm);';
+    var ic=document.createElement('span');ic.textContent=m.icon;
+    var tx=document.createElement('span');
+    var b=document.createElement('b');b.style.color='var(--tx)';b.textContent=m.lbl+': ';
+    tx.appendChild(b);tx.appendChild(document.createTextNode(m.desc));
+    row.appendChild(ic);row.appendChild(tx);leg.appendChild(row);
+  });
+  card.appendChild(leg);
+  var sortNote=document.createElement('div');
+  sortNote.style.cssText='font-size:12px;color:var(--tl);margin-bottom:14px;';
+  sortNote.textContent='Sorted by Importance (what tablers care about most), then by Gap (where improvement is needed).';
+  card.appendChild(sortNote);
   G.analysis.forEach(function(item,i){
     var rk=['rk1','rk2','rk3','rkm','rkm','rkm','rkg'][i]||'rkm';
     var bc=item.gap>20?'bc':item.gap>5?'bm':'bg';
@@ -916,29 +940,157 @@ function appendAICard(body){
 
 function generateAI(){
   var card=document.getElementById('ai-card');if(!card)return;
-  var btn=card.querySelector('button');if(btn){btn.innerHTML='<span class="spin"></span> Generating...';btn.disabled=true;}
+  var btn=card.querySelector('button');
+  if(btn){btn.innerHTML='<span class="spin"></span> Generating full report...';btn.disabled=true;}
+
   var allSug=[];
   G.subs.forEach(function(s){(s.suggestions||[]).forEach(function(t){if(t)allSug.push(t);});});
-  var st=allSug.length?(' Tabler suggestions: '+allSug.join('; ')):'';
-  var dataStr=G.analysis.map(function(d,i){return (i+1)+'. '+d.label+': Importance='+d.avgImp.toFixed(1)+'%, Score='+d.avgScr.toFixed(1)+'/10, Gap='+d.gap.toFixed(1)+'%';}).join('. ');
-  var prompt='You are an advisor to Round Table India, Table '+G.loggedTable+'. '+G.subs.length+' tablers completed a Vision Wheel. Data: '+dataStr+st+'. Write a 4-paragraph executive summary: Para 1: top 2 urgent areas. Para 2: areas doing well. Para 3: suggestion themes (if any). Para 4: one actionable recommendation. Plain text only, no markdown.';
-  fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,messages:[{role:'user',content:prompt}]})
-  }).then(function(r){return r.json();})
-  .then(function(j){
-    var txt=(j.content||[]).find(function(b){return b.type==='text';});
+
+  var sorted=G.analysis.slice().sort(function(a,b){
+    if(Math.abs(b.avgImp-a.avgImp)>1)return b.avgImp-a.avgImp;
+    return b.gap-a.gap;
+  });
+
+  var facetLines=sorted.map(function(d,i){
+    var status=d.gap>20?'CRITICAL - needs urgent attention':
+               d.gap>8 ?'MODERATE - room for improvement':
+               d.gap>0 ?'ACCEPTABLE - minor improvement needed':'STRONG - performing well';
+    return (i+1)+'. '+d.label+'\n'+
+      '   Importance: '+d.avgImp.toFixed(1)+'%\n'+
+      '   Score: '+d.avgScr.toFixed(1)+'/10 ('+d.scorePct.toFixed(1)+'% effectiveness)\n'+
+      '   Attention Gap: '+d.gap.toFixed(1)+'% | Status: '+status;
+  }).join('\n');
+
+  var sugSection='';
+  if(allSug.length){
+    sugSection='\n\nTABLER SUGGESTIONS:\n'+allSug.map(function(s,i){return (i+1)+'. '+s;}).join('\n');
+  }
+
+  var prompt=
+    'You are writing a formal Vision Wheel executive report for the Table Chairman of '+G.loggedName+
+    ' (Round Table India). '+G.subs.length+' tabler(s) completed this survey.\n\n'+
+    'METRIC DEFINITIONS:\n'+
+    '- Importance %: How much tablers value this facet (higher = more critical to them)\n'+
+    '- Performance Score /10: How well the table currently performs in this facet\n'+
+    '- Attention Gap %: Importance minus normalised Score. Above 10% = underdelivering on something tablers care about deeply. Above 20% = critical.\n\n'+
+    'SURVEY DATA (sorted by Importance, then Gap):\n'+facetLines+sugSection+'\n\n'+
+    'Write a comprehensive chairman report with these exact sections:\n\n'+
+    '1. EXECUTIVE OVERVIEW (3-4 sentences): Current state of the table, total respondents, overall health assessment.\n\n'+
+    '2. TOP PRIORITIES REQUIRING IMMEDIATE ATTENTION: For each facet with Gap above 10%, write 2-3 sentences explaining why this facet matters, what the gap tells us, and specific actions to close it.\n\n'+
+    '3. AREAS OF STRENGTH: For facets with gap under 5%, acknowledge the achievement and how to sustain it.\n\n'+
+    '4. TABLER VOICE - KEY THEMES: Analyse the suggestions submitted. Identify 2-3 common themes and what they signal about tabler sentiment.\n\n'+
+    '5. CHAIRMAN\'s ACTION PLAN FOR THE YEAR: Write 4-5 concrete, specific, measurable actions the chairman should take this tabling year, directly linked to the data.\n\n'+
+    '6. CLOSING NOTE: One motivating paragraph to the chairman.\n\n'+
+    'Tone: professional, direct, warm. Write in complete paragraphs under each section heading. Use the metric values explicitly in your analysis.';
+
+  callScript({action:'generateAI',tableNo:G.loggedTable,password:G.loggedPass,prompt:prompt})
+  .then(function(r){
+    if(r.ok){
+      renderAIReport(r.text,sorted);
+    } else {
+      if(card){
+        card.innerHTML='';
+        var h=document.createElement('div');h.className='sec-title';h.textContent='AI Executive Summary';
+        var errBox=document.createElement('div');
+        errBox.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;';
+        var errTitle=document.createElement('div');errTitle.style.cssText='font-weight:700;color:#DC2626;margin-bottom:8px;font-size:14px;';
+        errTitle.textContent='Could not generate summary';
+        var errMsg=document.createElement('div');errMsg.style.cssText='font-size:13px;color:#991B1B;line-height:1.6;';
+        errMsg.textContent=r.error||'Unknown error.';
+        var hint=document.createElement('div');hint.style.cssText='font-size:12px;color:#991B1B;margin-top:8px;padding-top:8px;border-top:1px solid #FECACA;';
+        hint.textContent='Make sure GEMINI_API_KEY is set in Code.gs (get free key at aistudio.google.com/apikey) and redeployed as a new version.';
+        errBox.appendChild(errTitle);errBox.appendChild(errMsg);errBox.appendChild(hint);
+        card.appendChild(h);card.appendChild(errBox);
+        var retryBtn=document.createElement('button');retryBtn.className='btn btn-primary';
+        retryBtn.style.marginTop='12px';retryBtn.textContent='Try Again';
+        retryBtn.addEventListener('click',generateAI);card.appendChild(retryBtn);
+      }
+    }
+  }).catch(function(err){
     if(card){
       card.innerHTML='';
       var h=document.createElement('div');h.className='sec-title';h.textContent='AI Executive Summary';
-      var t=document.createElement('div');t.className='card-title';t.style.marginBottom='14px';t.textContent='Insights for the Chairman';
-      var box=document.createElement('div');box.className='ai-box';box.textContent=txt?txt.text:'Analysis unavailable.';
-      card.appendChild(h);card.appendChild(t);card.appendChild(box);
+      var errBox=document.createElement('div');
+      errBox.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;font-size:13px;color:#991B1B;';
+      errBox.textContent='Network error - check your connection and try again.';
+      card.appendChild(h);card.appendChild(errBox);
+      var retryBtn=document.createElement('button');retryBtn.className='btn btn-primary';
+      retryBtn.style.marginTop='12px';retryBtn.textContent='Try Again';
+      retryBtn.addEventListener('click',generateAI);card.appendChild(retryBtn);
     }
-  }).catch(function(){
-    if(card){var box=document.createElement('div');box.className='ai-box';box.textContent='Could not generate analysis.';card.appendChild(box);}
   });
+}
+
+function renderAIReport(text,sorted){
+  var card=document.getElementById('ai-card');if(!card)return;
+  card.innerHTML='';
+  var h=document.createElement('div');h.className='sec-title';h.textContent='AI Executive Summary';
+  var t=document.createElement('div');t.className='card-title';t.style.marginBottom='4px';t.textContent="Chairman's Vision Wheel Report";
+  var meta=document.createElement('div');meta.style.cssText='font-size:12px;color:var(--tl);margin-bottom:20px;';
+  meta.textContent=G.loggedName+' \u00b7 '+G.subs.length+' response'+(G.subs.length!==1?'s':'')+' \u00b7 Generated '+new Date().toLocaleDateString('en-IN');
+  card.appendChild(h);card.appendChild(t);card.appendChild(meta);
+
+  var strip=document.createElement('div');
+  strip.style.cssText='background:linear-gradient(135deg,#1A3C7A,#0F2550);border-radius:14px;padding:16px 18px;margin-bottom:18px;';
+  var stripTitle=document.createElement('div');
+  stripTitle.style.cssText='font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:12px;';
+  stripTitle.textContent='HOW TO READ THIS REPORT';
+  strip.appendChild(stripTitle);
+  [{icon:'📊',name:'Importance %',desc:'How much tablers value this area. Higher = more critical to your members.'},
+   {icon:'⭐',name:'Score /10',desc:"How well the table currently performs. Based on tablers' own ratings."},
+   {icon:'⚡',name:'Attention Gap %',desc:'Importance minus performance. Above 10% = needs focused action. Above 20% = urgent.'}
+  ].forEach(function(m){
+    var row=document.createElement('div');row.style.cssText='display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;';
+    var icon=document.createElement('span');icon.style.cssText='font-size:18px;flex-shrink:0;margin-top:1px;';icon.textContent=m.icon;
+    var txWrap=document.createElement('div');
+    var nm=document.createElement('div');nm.style.cssText='font-size:13px;font-weight:700;color:#fff;';nm.textContent=m.name;
+    var ds=document.createElement('div');ds.style.cssText='font-size:12px;color:rgba(255,255,255,.6);line-height:1.5;';ds.textContent=m.desc;
+    txWrap.appendChild(nm);txWrap.appendChild(ds);row.appendChild(icon);row.appendChild(txWrap);strip.appendChild(row);
+  });
+  card.appendChild(strip);
+
+  var qc=document.createElement('div');qc.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px;';
+  var critical=sorted.filter(function(d){return d.gap>20;}).length;
+  var moderate=sorted.filter(function(d){return d.gap>8&&d.gap<=20;}).length;
+  var strong  =sorted.filter(function(d){return d.gap<=5;}).length;
+  [{v:critical,l:'Critical',c:'#FEF2F2',tc:'#DC2626',bc:'#FECACA'},
+   {v:moderate,l:'Moderate',c:'#FFF7ED',tc:'#D97706',bc:'#FED7AA'},
+   {v:strong,  l:'Strong',  c:'#F0FDF4',tc:'#16A34A',bc:'#BBF7D0'}
+  ].forEach(function(item){
+    var box=document.createElement('div');
+    box.style.cssText='background:'+item.c+';border:1.5px solid '+item.bc+';border-radius:12px;padding:12px;text-align:center;';
+    var num=document.createElement('div');num.style.cssText='font-family:Playfair Display,serif;font-size:1.8rem;font-weight:700;color:'+item.tc+';';num.textContent=item.v;
+    var lbl=document.createElement('div');lbl.style.cssText='font-size:11px;font-weight:700;color:'+item.tc+';margin-top:2px;';lbl.textContent=item.l;
+    box.appendChild(num);box.appendChild(lbl);qc.appendChild(box);
+  });
+  card.appendChild(qc);
+
+  var aiBox=document.createElement('div');
+  aiBox.style.cssText='background:var(--gdl);border:1.5px solid rgba(200,151,58,.2);border-radius:var(--rs);padding:20px;';
+  var paras=text.split(/\n\n+/);
+  paras.forEach(function(para){
+    if(!para.trim())return;
+    var lines=para.split('\n');
+    lines.forEach(function(line){
+      if(!line.trim())return;
+      var isHdr=line.match(/^\d+\.\s+[A-Z]|^[A-Z][A-Z\s\-']+:?\s*$/) && line.length<80;
+      if(isHdr){
+        var b=document.createElement('div');
+        b.style.cssText='font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--nv);margin:16px 0 6px;';
+        b.textContent=line;aiBox.appendChild(b);
+      } else {
+        var p=document.createElement('p');
+        p.style.cssText='font-size:14px;line-height:1.85;color:var(--tx);margin-bottom:10px;';
+        p.textContent=line;aiBox.appendChild(p);
+      }
+    });
+  });
+  card.appendChild(aiBox);
+
+  var dlBtn=document.createElement('button');dlBtn.className='btn btn-gold-ol';dlBtn.style.marginTop='14px';
+  dlBtn.textContent='Download PDF Report';
+  dlBtn.addEventListener('click',function(){exportPDF(text,sorted);});
+  card.appendChild(dlBtn);
 }
 
 function appendSugCard(body){
@@ -1013,29 +1165,250 @@ function refreshDash(){
   .catch(function(){clearToast();toast('Network error.','terr');});
 }
 
-function exportCSV(){
+function exportXLSX(){
   if(!G.subs.length)return;
-  var rows=[['Name','Table','Date'].concat(FACETS.map(function(f){return 'IMP_'+f.short;})).concat(FACETS.map(function(f){return 'SCR_'+f.short;})).concat(['Sug1','Sug2','Sug3'])];
+  // Build workbook using SheetJS-style simple XML (XLSX Open XML)
+  var facets=FACETS;
+  // Sheet 1: Raw Data
+  var wsData=[];
+  var hdr1=['Name','Table','Submitted At'];
+  facets.forEach(function(f){hdr1.push('IMP: '+f.label+' (%)');});
+  facets.forEach(function(f){hdr1.push('SCR: '+f.label+' (/10)');});
+  hdr1.push('Suggestion 1','Suggestion 2','Suggestion 3');
+  wsData.push(hdr1);
   G.subs.forEach(function(s){
     var row=[s.name,s.tableNo,new Date(s.submittedAt).toLocaleString()];
-    FACETS.forEach(function(f){row.push(s.importance[f.id]||0);});
-    FACETS.forEach(function(f){row.push(s.scores[f.id]||0);});
+    facets.forEach(function(f){row.push(s.importance[f.id]||0);});
+    facets.forEach(function(f){row.push(s.scores[f.id]||0);});
     var sg=s.suggestions||[];row.push(sg[0]||'',sg[1]||'',sg[2]||'');
-    rows.push(row);
+    wsData.push(row);
   });
-  var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
-  dlFile(new Blob([csv],{type:'text/csv'}),'rti-t'+G.loggedTable+'-'+today()+'.csv');
+  // Sheet 2: Analysis
+  var wsAnalysis=[
+    ['RTI VISION WHEEL - PRIORITY ANALYSIS','','','','',''],
+    [G.loggedName+' | '+G.subs.length+' Responses | '+new Date().toLocaleDateString('en-IN'),'','','','',''],
+    [''],
+    ['Rank','Facet','Importance %','Score /10','Score %','Gap %','Status','What this means']
+  ];
+  G.analysis.forEach(function(d,i){
+    var status=d.gap>20?'CRITICAL':d.gap>10?'NEEDS ATTENTION':d.gap>5?'MODERATE':'STRONG';
+    var meaning=d.gap>20?'Tablers value this highly but performance is significantly below expectations':
+                d.gap>10?'Notable gap between expectations and delivery - plan focused improvement':
+                d.gap>5 ?'Small gap - minor fine-tuning recommended':'Table is meeting or exceeding tabler expectations here';
+    wsAnalysis.push([i+1,d.label,d.avgImp.toFixed(1),d.avgScr.toFixed(1),d.scorePct.toFixed(1),d.gap.toFixed(1),status,meaning]);
+  });
+  wsAnalysis.push(['']);
+  wsAnalysis.push(['METRIC DEFINITIONS','']);
+  wsAnalysis.push(['Importance %','How much tablers collectively value this area (assigned by tablers, must total 100%)']);
+  wsAnalysis.push(['Score /10','Average performance rating given by tablers (1=Poor, 10=Excellent)']);
+  wsAnalysis.push(['Score %','Score expressed as a percentage (Score/10 x 100) for direct comparison with Importance']);
+  wsAnalysis.push(['Gap %','Importance% minus Score%. Positive gap = underperforming vs expectations. Negative = exceeding expectations']);
+  // Sheet 3: Suggestions
+  var wsSug=[['Tabler Name','Suggestion 1','Suggestion 2','Suggestion 3']];
+  G.subs.forEach(function(s){
+    var sg=s.suggestions||[];
+    if((sg[0]||sg[1]||sg[2])){
+      wsSug.push([s.name,sg[0]||'',sg[1]||'',sg[2]||'']);
+    }
+  });
+
+  // Build simple CSV-based XLSX alternative (proper xlsx needs SheetJS)
+  // We'll build a proper multi-sheet workbook using the xlsx library loaded from CDN
+  var script=document.createElement('script');
+  script.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  script.onload=function(){
+    var wb=XLSX.utils.book_new();
+    var ws1=XLSX.utils.aoa_to_sheet(wsData);
+    var ws2=XLSX.utils.aoa_to_sheet(wsAnalysis);
+    var ws3=XLSX.utils.aoa_to_sheet(wsSug);
+    // Column widths
+    ws1['!cols']=[{wch:20},{wch:8},{wch:22}].concat(facets.map(function(){return{wch:14};})).concat(facets.map(function(){return{wch:14};})).concat([{wch:40},{wch:40},{wch:40}]);
+    ws2['!cols']=[{wch:6},{wch:34},{wch:14},{wch:12},{wch:12},{wch:10},{wch:18},{wch:60}];
+    ws3['!cols']=[{wch:20},{wch:50},{wch:50},{wch:50}];
+    XLSX.utils.book_append_sheet(wb,ws1,'Raw Data');
+    XLSX.utils.book_append_sheet(wb,ws2,'Priority Analysis');
+    XLSX.utils.book_append_sheet(wb,ws3,'Suggestions');
+    XLSX.writeFile(wb,'RTI-VisionWheel-'+G.loggedTable+'-'+today()+'.xlsx');
+    toast('XLSX downloaded!','tok');
+  };
+  script.onerror=function(){toast('Could not load XLSX library. Check your connection.','terr');};
+  document.head.appendChild(script);
 }
-function exportReport(){
-  if(!G.analysis)return;
-  var aiBox=document.querySelector('#ai-card .ai-box');
-  var aiTxt=aiBox?aiBox.textContent:'(Generate AI Summary in dashboard)';
-  var lines=['ROUND TABLE INDIA - VISION WHEEL ANALYSIS REPORT','Table: '+G.loggedTable+' - '+G.loggedName,'Generated: '+new Date().toLocaleString(),'Responses: '+G.subs.length,'','PRIORITY RANKING',''];
-  G.analysis.forEach(function(d,i){lines.push((i+1)+'. '+d.label+' | Imp: '+d.avgImp.toFixed(1)+'% | Score: '+d.avgScr.toFixed(1)+'/10 | Gap: '+d.gap.toFixed(1)+'%');});
-  lines.push('','SUGGESTIONS','');
-  G.subs.forEach(function(s){var sg=(s.suggestions||[]).filter(function(x){return x;});if(!sg.length)return;lines.push(s.name+':');sg.forEach(function(t,i){lines.push('  '+(i+1)+'. '+t);});lines.push('');});
-  lines.push('AI EXECUTIVE SUMMARY','',aiTxt);
-  dlFile(new Blob([lines.join('\n')],{type:'text/plain'}),'rti-t'+G.loggedTable+'-report-'+today()+'.txt');
+
+function exportPDF(aiTextOverride, sortedOverride){
+  var analysis = sortedOverride || (G.analysis ? G.analysis.slice().sort(function(a,b){
+    if(Math.abs(b.avgImp-a.avgImp)>1) return b.avgImp-a.avgImp;
+    return b.gap-a.gap;
+  }) : []);
+
+  // Load jsPDF from CDN
+  var script=document.createElement('script');
+  script.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  script.onload=function(){
+    var btn=document.getElementById('exp-pdf-btn');
+    if(btn){btn.innerHTML='Building PDF...';}
+    var jsPDF=window.jspdf.jsPDF;
+    var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    var pw=210,ph=297,ml=18,mr=18,mt=22,cw=pw-ml-mr;
+    var y=mt;
+    var PAGE_BOTTOM=ph-18;
+
+    function checkPage(needed){if(y+needed>PAGE_BOTTOM){doc.addPage();y=mt;}}
+
+    // Colors
+    var NAVY=[26,60,122],GOLD=[200,151,58],WHITE=[255,255,255],
+        LIGHT=[238,244,252],MID=[78,101,128],RED=[220,38,38],
+        ORANGE=[217,119,6],GREEN=[22,163,74],DARK=[26,43,69];
+
+    // Header block
+    doc.setFillColor.apply(doc,NAVY);
+    doc.rect(0,0,pw,42,'F');
+    doc.setTextColor.apply(doc,WHITE);
+    doc.setFontSize(20);doc.setFont('helvetica','bold');
+    doc.text('VISION WHEEL REPORT',ml,y+6);
+    doc.setFontSize(10);doc.setFont('helvetica','normal');
+    doc.text(G.loggedName,ml,y+14);
+    doc.text(G.subs.length+' Responses  |  Generated: '+new Date().toLocaleDateString('en-IN'),ml,y+20);
+    y=50;
+
+    // Scorecard boxes
+    var critical=analysis.filter(function(d){return d.gap>20;}).length;
+    var moderate=analysis.filter(function(d){return d.gap>8&&d.gap<=20;}).length;
+    var strong  =analysis.filter(function(d){return d.gap<=5;}).length;
+    var bw=(cw-8)/3;
+    [[critical,'CRITICAL','Needs Urgent Action',[254,226,226],[220,38,38]],
+     [moderate,'MODERATE','Needs Improvement',[255,247,237],[217,119,6]],
+     [strong,'STRONG','Performing Well',[240,253,244],[22,163,74]]
+    ].forEach(function(item,i){
+      var bx=ml+(bw+4)*i;
+      doc.setFillColor(item[3][0],item[3][1],item[3][2]);
+      doc.roundedRect(bx,y,bw,20,3,3,'F');
+      doc.setTextColor(item[4][0],item[4][1],item[4][2]);
+      doc.setFontSize(22);doc.setFont('helvetica','bold');
+      doc.text(String(item[0]),bx+bw/2,y+11,{align:'center'});
+      doc.setFontSize(7);doc.setFont('helvetica','bold');
+      doc.text(item[1],bx+bw/2,y+16,{align:'center'});
+      doc.setFont('helvetica','normal');
+      doc.text(item[2],bx+bw/2,y+20,{align:'center'});
+    });
+    y+=28;
+
+    // Metric legend
+    doc.setFillColor(238,244,252);doc.roundedRect(ml,y,cw,18,3,3,'F');
+    doc.setTextColor(26,60,122);doc.setFontSize(7);doc.setFont('helvetica','bold');
+    doc.text('HOW TO READ:',ml+4,y+5);
+    doc.setFont('helvetica','normal');doc.setTextColor(78,101,128);
+    doc.text('Importance % = how much tablers value this area   |   Score /10 = current performance rating   |   Gap % = Importance minus performance (higher = more urgent)',ml+4,y+11);
+    doc.text('Sorted by Importance first, then by Gap. Gap above 10% = needs attention. Gap above 20% = critical.',ml+4,y+16);
+    y+=24;
+
+    // Section title helper
+    function sectionTitle(title){
+      checkPage(12);
+      doc.setFillColor.apply(doc,NAVY);
+      doc.rect(ml,y,cw,7,'F');
+      doc.setTextColor.apply(doc,WHITE);
+      doc.setFontSize(9);doc.setFont('helvetica','bold');
+      doc.text(title.toUpperCase(),ml+4,y+5);
+      y+=11;
+    }
+
+    // Priority Analysis Table
+    sectionTitle('Priority Analysis — Sorted by Importance, then Attention Gap');
+    var cols=[6,74,22,18,14,18,28];
+    var headers=['#','Facet','Imp %','Score /10','Score %','Gap %','Status'];
+    // Table header
+    doc.setFillColor(238,244,252);doc.rect(ml,y,cw,7,'F');
+    doc.setTextColor.apply(doc,NAVY);doc.setFontSize(7);doc.setFont('helvetica','bold');
+    var cx=ml;
+    headers.forEach(function(hdr,i){doc.text(hdr,cx+2,y+5);cx+=cols[i];});
+    y+=8;
+    // Rows
+    analysis.forEach(function(d,i){
+      checkPage(8);
+      var rowColor=i%2===0?[255,255,255]:[248,251,255];
+      doc.setFillColor(rowColor[0],rowColor[1],rowColor[2]);
+      doc.rect(ml,y,cw,7,'F');
+      // Status color bar
+      var sc=d.gap>20?RED:d.gap>10?ORANGE:d.gap>5?[234,179,8]:GREEN;
+      doc.setFillColor(sc[0],sc[1],sc[2]);
+      doc.rect(ml+cw-28,y,28,7,'F');
+      doc.setTextColor.apply(doc,DARK);doc.setFontSize(7);doc.setFont('helvetica','normal');
+      var vals=[i+1,d.label,d.avgImp.toFixed(1)+'%',d.avgScr.toFixed(1)+'/10',d.scorePct.toFixed(1)+'%',d.gap.toFixed(1)+'%'];
+      var status=d.gap>20?'CRITICAL':d.gap>10?'NEEDS ATTN':d.gap>5?'MODERATE':'STRONG';
+      cx=ml;
+      vals.forEach(function(v,vi){
+        var txt=String(v);
+        if(vi===1&&txt.length>30)txt=txt.slice(0,28)+'..';
+        doc.text(txt,cx+2,y+5);
+        cx+=cols[vi];
+      });
+      doc.setTextColor.apply(doc,WHITE);doc.setFont('helvetica','bold');
+      doc.text(status,ml+cw-14,y+5,{align:'center'});
+      y+=7;
+    });
+    y+=6;
+
+    // Suggestions
+    var allSug=[];
+    G.subs.forEach(function(s){(s.suggestions||[]).forEach(function(t){if(t)allSug.push({name:s.name,text:t});});});
+    if(allSug.length){
+      checkPage(20);
+      sectionTitle('Tabler Suggestions');
+      allSug.forEach(function(sg){
+        checkPage(12);
+        doc.setFillColor(255,248,235);doc.roundedRect(ml,y,cw,10,2,2,'F');
+        doc.setTextColor.apply(doc,NAVY);doc.setFontSize(7);doc.setFont('helvetica','bold');
+        doc.text(sg.name,ml+4,y+5);
+        doc.setFont('helvetica','normal');doc.setTextColor.apply(doc,DARK);
+        var lines=doc.splitTextToSize(sg.text,cw-8);
+        doc.text(lines[0]||'',ml+4,y+9);
+        y+=12;
+      });
+      y+=4;
+    }
+
+    // AI Report section
+    var aiTextToUse = aiTextOverride;
+    if(!aiTextToUse){
+      var aiBox=document.querySelector('#ai-card .ai-box');
+      if(aiBox) aiTextToUse=aiBox.textContent;
+    }
+    if(aiTextToUse){
+      checkPage(20);
+      sectionTitle("AI Executive Summary");
+      doc.setTextColor.apply(doc,DARK);doc.setFontSize(9);doc.setFont('helvetica','normal');
+      var aiLines=doc.splitTextToSize(aiTextToUse,cw);
+      aiLines.forEach(function(line){
+        checkPage(6);
+        var isHeader=line.match(/^[A-Z][A-Z\s\-\':]+$/);
+        if(isHeader){
+          y+=3;
+          doc.setFont('helvetica','bold');doc.setTextColor.apply(doc,NAVY);doc.setFontSize(9);
+          doc.text(line,ml,y);y+=6;
+          doc.setFont('helvetica','normal');doc.setTextColor.apply(doc,DARK);doc.setFontSize(9);
+        } else {
+          doc.text(line,ml,y);y+=5.5;
+        }
+      });
+    }
+
+    // Footer on all pages
+    var totalPages=doc.internal.getNumberOfPages();
+    for(var pg=1;pg<=totalPages;pg++){
+      doc.setPage(pg);
+      doc.setFillColor(238,244,252);doc.rect(0,ph-10,pw,10,'F');
+      doc.setTextColor.apply(doc,MID);doc.setFontSize(7);doc.setFont('helvetica','normal');
+      doc.text('Round Table India  |  Vision Wheel  |  Confidential',ml,ph-4);
+      doc.text('Page '+pg+' of '+totalPages,pw-ml,ph-4,{align:'right'});
+    }
+
+    doc.save('RTI-VisionWheel-'+G.loggedTable+'-'+today()+'.pdf');
+    if(btn){btn.innerHTML='&#x2B07; PDF Report';}
+    toast('PDF downloaded!','tok');
+  };
+  script.onerror=function(){toast('Could not load PDF library. Check your connection.','terr');};
+  document.head.appendChild(script);
 }
 
 function callScript(params){

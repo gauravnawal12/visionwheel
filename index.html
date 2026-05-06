@@ -464,7 +464,7 @@ td.sc{white-space:normal;max-width:160px;font-size:11px;line-height:1.5;}
 </div>
 
 <script>
-var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxBRDM6KQcSXiW0MbASMptuFBhp2XX9PzElm2XH2a50hZiOz4rCzt3-Oiog13_WvH08/exec";
+var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxxhKEot8b_4JUkzPIuM3iAVoAag7GL_orv1XnePcsRt3sJD4nbUdWgscB0-BVnigck/exec";
 
 var FACETS = [
   {id:"administration",  label:"Administration (Day to Day Table Working)", short:"Admin",       icon:"gear"},
@@ -817,6 +817,7 @@ function renderAccounts(){
 }
 
 
+
 function addAccount(){
   var tbl=(document.getElementById('new-tbl').value||'').trim();
   var name=document.getElementById('new-name').value.trim();
@@ -852,6 +853,396 @@ function doChangeSuperPw(){
   callScript({action:'setSuperPw',currentPassword:G.superPass,newPassword:np})
   .then(function(r){if(r.ok){G.superPass=np;document.getElementById('sp-new').value='';document.getElementById('sp-confirm').value='';document.getElementById('sp-str').innerHTML='';toast('Super admin password updated.','tok');}else toast(r.error||'Failed.','terr');})
   .catch(function(){toast('Network error.','terr');});
+}
+
+function appendRadarChart(body){
+  var card = document.createElement('div'); card.className='card'; card.style.marginBottom='14px';
+  var h = document.createElement('div'); h.className='sec-title'; h.textContent='Performance Radar';
+  var t = document.createElement('div'); t.className='card-title'; t.style.marginBottom='14px'; t.textContent='Score by Facet (out of 10)';
+  card.appendChild(h); card.appendChild(t);
+
+  var n = G.analysis.length;
+  var W=340, H=340, cx=170, cy=160, r=95;
+  var angleStep = (2*Math.PI)/n;
+  var svgNS = 'http://www.w3.org/2000/svg';
+
+  var svg = document.createElementNS(svgNS,'svg');
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.setAttribute('width','100%');
+  svg.style.cssText='max-width:340px;display:block;margin:0 auto;overflow:visible;';
+
+  // Grid rings at 2,4,6,8,10
+  [2,4,6,8,10].forEach(function(lv){
+    var pts = G.analysis.map(function(_,i){
+      var a=(i*angleStep)-Math.PI/2;
+      var rr=(lv/10)*r;
+      return (cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1);
+    }).join(' ');
+    var poly=document.createElementNS(svgNS,'polygon');
+    poly.setAttribute('points',pts);
+    poly.setAttribute('fill','none');
+    poly.setAttribute('stroke',lv===10?'#C8D8EC':'#DDE6F0');
+    poly.setAttribute('stroke-width',lv===10?'1.5':'1');
+    svg.appendChild(poly);
+    // Ring label at top
+    var rl=document.createElementNS(svgNS,'text');
+    rl.setAttribute('x', cx+3);
+    rl.setAttribute('y', (cy-(lv/10)*r+3).toFixed(1));
+    rl.setAttribute('font-size','7');
+    rl.setAttribute('fill','#8AA0B8');
+    rl.setAttribute('font-family','Inter,sans-serif');
+    rl.textContent=lv;
+    svg.appendChild(rl);
+  });
+
+  // Axis spokes
+  G.analysis.forEach(function(_,i){
+    var a=i*angleStep-Math.PI/2;
+    var line=document.createElementNS(svgNS,'line');
+    line.setAttribute('x1',cx); line.setAttribute('y1',cy);
+    line.setAttribute('x2',(cx+r*Math.cos(a)).toFixed(1));
+    line.setAttribute('y2',(cy+r*Math.sin(a)).toFixed(1));
+    line.setAttribute('stroke','#DDE6F0'); line.setAttribute('stroke-width','1');
+    svg.appendChild(line);
+  });
+
+  // Score polygon (filled)
+  var pts = G.analysis.map(function(d,i){
+    var a=i*angleStep-Math.PI/2;
+    var rr=(d.avgScr/10)*r;
+    return (cx+rr*Math.cos(a)).toFixed(1)+','+(cy+rr*Math.sin(a)).toFixed(1);
+  }).join(' ');
+  var poly=document.createElementNS(svgNS,'polygon');
+  poly.setAttribute('points',pts);
+  poly.setAttribute('fill','rgba(26,60,122,0.15)');
+  poly.setAttribute('stroke','#1A3C7A');
+  poly.setAttribute('stroke-width','2');
+  poly.setAttribute('stroke-linejoin','round');
+  svg.appendChild(poly);
+
+  // Dots + value labels inside
+  G.analysis.forEach(function(d,i){
+    var a=i*angleStep-Math.PI/2;
+    var rr=(d.avgScr/10)*r;
+    var x=(cx+rr*Math.cos(a)); var y2=(cy+rr*Math.sin(a));
+    var clr=d.avgScr<=5?'#DC2626':d.avgScr<=8?'#D97706':'#16A34A';
+    var dot=document.createElementNS(svgNS,'circle');
+    dot.setAttribute('cx',x.toFixed(1)); dot.setAttribute('cy',y2.toFixed(1));
+    dot.setAttribute('r','5'); dot.setAttribute('fill',clr);
+    dot.setAttribute('stroke','#fff'); dot.setAttribute('stroke-width','1.5');
+    svg.appendChild(dot);
+    // Score label near dot (offset toward center slightly)
+    var lx=cx+(rr-14)*Math.cos(a); var ly2=cy+(rr-14)*Math.sin(a);
+    var vl=document.createElementNS(svgNS,'text');
+    vl.setAttribute('x',lx.toFixed(1)); vl.setAttribute('y',(ly2+3).toFixed(1));
+    vl.setAttribute('font-size','9'); vl.setAttribute('fill',clr);
+    vl.setAttribute('font-weight','700'); vl.setAttribute('text-anchor','middle');
+    vl.setAttribute('font-family','Inter,sans-serif');
+    vl.textContent=d.avgScr.toFixed(1);
+    svg.appendChild(vl);
+  });
+
+  // Axis labels — placed OUTSIDE the ring with generous padding
+  G.analysis.forEach(function(d,i){
+    var a=i*angleStep-Math.PI/2;
+    var lx=cx+(r+30)*Math.cos(a);
+    var ly2=cy+(r+30)*Math.sin(a);
+    // Short label — first word only, max 8 chars
+    var words=d.label.split(' ');
+    var short=words[0].slice(0,8);
+    if(d.label.includes('(')) short=d.label.split('(')[0].trim().split(' ').slice(0,2).join(' ');
+
+    var lbl=document.createElementNS(svgNS,'text');
+    lbl.setAttribute('x',lx.toFixed(1));
+    lbl.setAttribute('y',ly2.toFixed(1));
+    lbl.setAttribute('font-size','9');
+    lbl.setAttribute('font-weight','700');
+    lbl.setAttribute('fill','#1A3C7A');
+    lbl.setAttribute('font-family','Inter,sans-serif');
+    // Anchor based on position
+    var anchor = Math.cos(a) > 0.3 ? 'start' : Math.cos(a) < -0.3 ? 'end' : 'middle';
+    lbl.setAttribute('text-anchor', anchor);
+    lbl.setAttribute('dominant-baseline','middle');
+    // Split into two lines if long
+    if(short.length > 8 || d.label.split(' ').length > 2){
+      var w1=words[0]; var w2=words.slice(1,3).join(' ').slice(0,10);
+      lbl.textContent=w1;
+      var lbl2=document.createElementNS(svgNS,'text');
+      lbl2.setAttribute('x',lx.toFixed(1));
+      lbl2.setAttribute('y',(ly2+11).toFixed(1));
+      lbl2.setAttribute('font-size','8'); lbl2.setAttribute('fill','#527090');
+      lbl2.setAttribute('font-family','Inter,sans-serif');
+      lbl2.setAttribute('text-anchor',anchor);
+      lbl2.textContent=w2;
+      svg.appendChild(lbl2);
+    } else {
+      lbl.textContent=short;
+    }
+    svg.appendChild(lbl);
+  });
+
+  card.appendChild(svg);
+
+  // Colour legend
+  var leg=document.createElement('div'); leg.style.cssText='display:flex;justify-content:center;gap:16px;margin-top:12px;flex-wrap:wrap;';
+  [['#DC2626','0-5: Needs Improvement'],['#D97706','5-8: Doing OK'],['#16A34A','9-10: Doing Well']].forEach(function(item){
+    var row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:5px;font-size:11px;color:var(--tm);';
+    var dot=document.createElement('div'); dot.style.cssText='width:10px;height:10px;border-radius:50%;background:'+item[0]+';flex-shrink:0;';
+    row.appendChild(dot); row.appendChild(document.createTextNode(item[1]));
+    leg.appendChild(row);
+  });
+  card.appendChild(leg);
+  body.appendChild(card);
+}
+
+
+function appendImportanceChart(body){
+  var card = document.createElement('div'); card.className = 'card'; card.style.marginBottom = '14px';
+  var h = document.createElement('div'); h.className = 'sec-title'; h.textContent = 'What Tablers Value Most';
+  var t = document.createElement('div'); t.className = 'card-title'; t.style.marginBottom = '4px'; t.textContent = 'Importance by Facet';
+  var sub = document.createElement('div'); sub.style.cssText = 'font-size:12px;color:var(--tl);margin-bottom:16px;'; sub.textContent = 'Average importance % assigned by all tablers';
+  card.appendChild(h); card.appendChild(t); card.appendChild(sub);
+
+  // Sort by importance desc for this chart
+  var sorted = G.analysis.slice().sort(function(a,b){ return b.avgImp - a.avgImp; });
+  var maxImp = Math.max.apply(null, sorted.map(function(d){ return d.avgImp; }));
+
+  sorted.forEach(function(d){
+    var rowWrap = document.createElement('div'); rowWrap.style.cssText = 'margin-bottom:12px;';
+    var topRow  = document.createElement('div'); topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;';
+    var lbl     = document.createElement('div'); lbl.style.cssText = 'font-size:13px;font-weight:600;color:var(--tx);display:flex;align-items:center;gap:7px;';
+    var icSp    = document.createElement('span'); icSp.textContent = ICONS[d.icon] || d.icon;
+    var txSp    = document.createElement('span'); txSp.textContent = d.label;
+    lbl.appendChild(icSp); lbl.appendChild(txSp);
+    var pct = document.createElement('div'); pct.style.cssText = 'font-size:13px;font-weight:800;color:var(--nv);';
+    pct.textContent = d.avgImp.toFixed(1) + '%';
+    topRow.appendChild(lbl); topRow.appendChild(pct);
+
+    var track = document.createElement('div'); track.style.cssText = 'height:8px;background:var(--bd);border-radius:4px;overflow:hidden;position:relative;';
+    var fill  = document.createElement('div');
+    var pctW  = maxImp > 0 ? (d.avgImp / maxImp) * 100 : 0;
+    fill.style.cssText = 'height:100%;border-radius:4px;background:linear-gradient(90deg,var(--nv),#3B82F6);transition:width .8s cubic-bezier(.4,0,.2,1);';
+    fill.style.width = '0%';
+    setTimeout(function(){ fill.style.width = pctW + '%'; }, 100);
+    track.appendChild(fill);
+
+    rowWrap.appendChild(topRow); rowWrap.appendChild(track);
+    card.appendChild(rowWrap);
+  });
+
+  body.appendChild(card);
+}
+
+function appendPieChart(body){
+  var card=document.createElement('div'); card.className='card'; card.style.marginBottom='14px';
+  var h=document.createElement('div'); h.className='sec-title'; h.textContent='Score Distribution';
+  var t=document.createElement('div'); t.className='card-title'; t.style.marginBottom='14px'; t.textContent='Status Breakdown';
+  card.appendChild(h); card.appendChild(t);
+
+  var needsImp = G.analysis.filter(function(d){ return d.avgScr<=5; });
+  var doingOk  = G.analysis.filter(function(d){ return d.avgScr>5&&d.avgScr<=8; });
+  var doingWel = G.analysis.filter(function(d){ return d.avgScr>8; });
+  var segments = [
+    { label:'Needs Improvement', count:needsImp.length, color:'#DC2626', light:'#FEE2E2' },
+    { label:'Doing OK',          count:doingOk.length,  color:'#D97706', light:'#FEF3C7' },
+    { label:'Doing Well',        count:doingWel.length, color:'#16A34A', light:'#D1FAE5' }
+  ].filter(function(s){ return s.count>0; });
+
+  var total = G.analysis.length;
+  var svgNS='http://www.w3.org/2000/svg';
+  var W=300, H=220, cx=120, cy=100, r=85;
+
+  var svg=document.createElementNS(svgNS,'svg');
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.setAttribute('width','100%');
+  svg.style.cssText='max-width:320px;display:block;margin:0 auto;overflow:visible;';
+
+  var startAngle=-Math.PI/2;
+  segments.forEach(function(seg){
+    var sweep=(seg.count/total)*2*Math.PI;
+    var endAngle=startAngle+sweep;
+    var x1=cx+r*Math.cos(startAngle); var y1=cy+r*Math.sin(startAngle);
+    var x2=cx+r*Math.cos(endAngle);   var y2=cy+r*Math.sin(endAngle);
+    var large=sweep>Math.PI?1:0;
+
+    if(seg.count===total){
+      // Full circle
+      var circle=document.createElementNS(svgNS,'circle');
+      circle.setAttribute('cx',cx); circle.setAttribute('cy',cy);
+      circle.setAttribute('r',r); circle.setAttribute('fill',seg.color);
+      svg.appendChild(circle);
+    } else {
+      var path=document.createElementNS(svgNS,'path');
+      path.setAttribute('d','M '+cx+' '+cy+' L '+x1.toFixed(1)+' '+y1.toFixed(1)+' A '+r+' '+r+' 0 '+large+' 1 '+x2.toFixed(1)+' '+y2.toFixed(1)+' Z');
+      path.setAttribute('fill',seg.color);
+      path.setAttribute('stroke','#fff'); path.setAttribute('stroke-width','2');
+      svg.appendChild(path);
+    }
+
+    // % label inside slice
+    var midA=startAngle+sweep/2;
+    var lx=cx+(r*0.65)*Math.cos(midA); var ly=cy+(r*0.65)*Math.sin(midA);
+    var pct=Math.round((seg.count/total)*100);
+    if(pct>=15){
+      var ptxt=document.createElementNS(svgNS,'text');
+      ptxt.setAttribute('x',lx.toFixed(1)); ptxt.setAttribute('y',(ly+4).toFixed(1));
+      ptxt.setAttribute('text-anchor','middle'); ptxt.setAttribute('font-size','13');
+      ptxt.setAttribute('font-weight','700'); ptxt.setAttribute('fill','#fff');
+      ptxt.setAttribute('font-family','Inter,sans-serif');
+      ptxt.textContent=pct+'%';
+      svg.appendChild(ptxt);
+    }
+    startAngle=endAngle;
+  });
+
+  // Centre label
+  var cl=document.createElementNS(svgNS,'text');
+  cl.setAttribute('x',cx); cl.setAttribute('y',cy-5);
+  cl.setAttribute('text-anchor','middle'); cl.setAttribute('font-size','22');
+  cl.setAttribute('font-weight','700'); cl.setAttribute('fill','#1A3C7A');
+  cl.setAttribute('font-family','Playfair Display,serif');
+  cl.textContent=total;
+  svg.appendChild(cl);
+  var cl2=document.createElementNS(svgNS,'text');
+  cl2.setAttribute('x',cx); cl2.setAttribute('y',cy+12);
+  cl2.setAttribute('text-anchor','middle'); cl2.setAttribute('font-size','8');
+  cl2.setAttribute('fill','#8AA0B8'); cl2.setAttribute('font-family','Inter,sans-serif');
+  cl2.textContent='FACETS';
+  svg.appendChild(cl2);
+
+  card.appendChild(svg);
+
+  // Legend rows with facet names
+  var legWrap=document.createElement('div'); legWrap.style.cssText='margin-top:8px;';
+  [
+    { seg:needsImp, color:'#DC2626', light:'#FEF2F2', label:'Needs Improvement (0-5)' },
+    { seg:doingOk,  color:'#D97706', light:'#FFFBEB', label:'Doing OK (5-8)' },
+    { seg:doingWel, color:'#16A34A', light:'#F0FDF4', label:'Doing Well (9-10)' }
+  ].forEach(function(item){
+    if(!item.seg.length) return;
+    var row=document.createElement('div');
+    row.style.cssText='background:'+item.light+';border-radius:10px;padding:10px 12px;margin-bottom:7px;';
+    var hdr=document.createElement('div');
+    hdr.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:5px;';
+    var dot=document.createElement('div'); dot.style.cssText='width:12px;height:12px;border-radius:50%;background:'+item.color+';flex-shrink:0;';
+    var lbl=document.createElement('div'); lbl.style.cssText='font-size:12px;font-weight:700;color:'+item.color+';'; lbl.textContent=item.label;
+    hdr.appendChild(dot); hdr.appendChild(lbl); row.appendChild(hdr);
+    item.seg.forEach(function(d){
+      var fi=document.createElement('div'); fi.style.cssText='font-size:11px;color:var(--tm);padding:2px 0;display:flex;justify-content:space-between;';
+      var fn=document.createElement('span'); fn.textContent=ICONS[d.icon]+' '+d.label;
+      var sc=document.createElement('span'); sc.style.fontWeight='700'; sc.style.color=item.color; sc.textContent=d.avgScr.toFixed(1)+'/10';
+      fi.appendChild(fn); fi.appendChild(sc); row.appendChild(fi);
+    });
+    legWrap.appendChild(row);
+  });
+  card.appendChild(legWrap);
+  body.appendChild(card);
+}
+
+function appendHistogram(body){
+  var card=document.createElement('div'); card.className='card'; card.style.marginBottom='14px';
+  var h=document.createElement('div'); h.className='sec-title'; h.textContent='Score Distribution';
+  var t=document.createElement('div'); t.className='card-title'; t.style.marginBottom='4px'; t.textContent='Individual Tabler Ratings';
+  var sub=document.createElement('div'); sub.style.cssText='font-size:12px;color:var(--tl);margin-bottom:16px;'; sub.textContent='How many times each score (1-10) was given across all facets';
+  card.appendChild(h); card.appendChild(t); card.appendChild(sub);
+
+  // Count frequency of each score 1-10 across all subs and all facets
+  var FACET_IDS=['administration','communityService','fellowship','fundRaising','hrd','imageBuilding','extension'];
+  var freq={};
+  for(var i=1;i<=10;i++) freq[i]=0;
+  G.subs.forEach(function(s){
+    FACET_IDS.forEach(function(fid){
+      var sc=Math.round(s.scores[fid]||0);
+      if(sc>=1&&sc<=10) freq[sc]++;
+    });
+  });
+  var maxFreq=Math.max.apply(null,Object.values(freq));
+  if(maxFreq===0) return;
+
+  var svgNS='http://www.w3.org/2000/svg';
+  var W=300,H=160,padL=28,padB=28,padT=10,padR=10;
+  var chartW=W-padL-padR, chartH=H-padB-padT;
+  var barW=chartW/10, barGap=2;
+
+  var svg=document.createElementNS(svgNS,'svg');
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.setAttribute('width','100%');
+  svg.style.cssText='max-width:320px;display:block;margin:0 auto;';
+
+  // Y gridlines
+  [0.25,0.5,0.75,1].forEach(function(frac){
+    var gy=padT+chartH-(frac*chartH);
+    var gl=document.createElementNS(svgNS,'line');
+    gl.setAttribute('x1',padL); gl.setAttribute('y1',gy.toFixed(1));
+    gl.setAttribute('x2',W-padR); gl.setAttribute('y2',gy.toFixed(1));
+    gl.setAttribute('stroke','#EEF4FC'); gl.setAttribute('stroke-width','1');
+    svg.appendChild(gl);
+    var glt=document.createElementNS(svgNS,'text');
+    glt.setAttribute('x',padL-3); glt.setAttribute('y',(gy+3).toFixed(1));
+    glt.setAttribute('text-anchor','end'); glt.setAttribute('font-size','7');
+    glt.setAttribute('fill','#8AA0B8'); glt.setAttribute('font-family','Inter,sans-serif');
+    glt.textContent=Math.round(frac*maxFreq);
+    svg.appendChild(glt);
+  });
+
+  // Bars
+  for(var sc=1;sc<=10;sc++){
+    var barH=maxFreq>0?(freq[sc]/maxFreq)*chartH:0;
+    var bx=padL+(sc-1)*barW+barGap/2;
+    var by=padT+chartH-barH;
+    var clr=sc<=5?'#DC2626':sc<=8?'#D97706':'#16A34A';
+
+    var rect=document.createElementNS(svgNS,'rect');
+    rect.setAttribute('x',bx.toFixed(1)); rect.setAttribute('y',(padT+chartH).toFixed(1));
+    rect.setAttribute('width',(barW-barGap).toFixed(1)); rect.setAttribute('height','0');
+    rect.setAttribute('fill',clr); rect.setAttribute('rx','2');
+    svg.appendChild(rect);
+    // Animate
+    (function(el,finalY,finalH){
+      setTimeout(function(){ el.setAttribute('y',finalY.toFixed(1)); el.setAttribute('height',finalH.toFixed(1)); el.style.transition='all .6s cubic-bezier(.4,0,.2,1)'; },100);
+    })(rect,by,barH);
+
+    // Count on top
+    if(freq[sc]>0){
+      var vt=document.createElementNS(svgNS,'text');
+      vt.setAttribute('x',(bx+(barW-barGap)/2).toFixed(1));
+      vt.setAttribute('y',(by-2).toFixed(1));
+      vt.setAttribute('text-anchor','middle'); vt.setAttribute('font-size','8');
+      vt.setAttribute('fill',clr); vt.setAttribute('font-weight','700');
+      vt.setAttribute('font-family','Inter,sans-serif');
+      vt.textContent=freq[sc];
+      svg.appendChild(vt);
+    }
+
+    // X label
+    var xt=document.createElementNS(svgNS,'text');
+    xt.setAttribute('x',(bx+(barW-barGap)/2).toFixed(1));
+    xt.setAttribute('y',(H-10).toFixed(1));
+    xt.setAttribute('text-anchor','middle'); xt.setAttribute('font-size','8');
+    xt.setAttribute('fill','#527090'); xt.setAttribute('font-family','Inter,sans-serif');
+    xt.textContent=sc;
+    svg.appendChild(xt);
+  }
+
+  // Axes
+  var axX=document.createElementNS(svgNS,'line');
+  axX.setAttribute('x1',padL); axX.setAttribute('y1',padT+chartH);
+  axX.setAttribute('x2',W-padR); axX.setAttribute('y2',padT+chartH);
+  axX.setAttribute('stroke','#DDE6F0'); axX.setAttribute('stroke-width','1.5');
+  svg.appendChild(axX);
+
+  card.appendChild(svg);
+
+  // Zone labels
+  var zoneRow=document.createElement('div'); zoneRow.style.cssText='display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap;';
+  [['#DC2626','Scores 1-5','Needs Improvement'],['#D97706','Scores 6-8','Doing OK'],['#16A34A','Scores 9-10','Doing Well']].forEach(function(z){
+    var zb=document.createElement('div'); zb.style.cssText='display:flex;align-items:center;gap:5px;font-size:11px;color:var(--tm);';
+    var zd=document.createElement('div'); zd.style.cssText='width:10px;height:10px;border-radius:2px;background:'+z[0]+';flex-shrink:0;';
+    zb.appendChild(zd); zb.appendChild(document.createTextNode(z[1]+': '+z[2]));
+    zoneRow.appendChild(zb);
+  });
+  card.appendChild(zoneRow);
+  body.appendChild(card);
 }
 
 function appendRadarChart(body){
@@ -1101,6 +1492,8 @@ function buildDashboard(){
   backBtn.addEventListener('click', function(){ show('sc-survey'); });
   body.appendChild(backBtn);
 }
+
+
 
 
 function buildAnalysis(){
@@ -1706,6 +2099,280 @@ function today(){return new Date().toISOString().slice(0,10);}
 function dlFile(blob,name){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();}
 
 window.addEventListener('DOMContentLoaded',init);
+
+function loadAreaDashboard(){
+  var areaScreen = document.getElementById('sc-area-dashboard');
+  if(!areaScreen){
+    toast('Area dashboard screen not found.','terr'); return;
+  }
+  document.getElementById('area-dash-body').innerHTML = '';
+  var loadDiv = document.createElement('div'); loadDiv.className = 'empty';
+  var sp = document.createElement('div'); sp.className = 'spin spin-nv'; loadDiv.appendChild(sp);
+  loadDiv.appendChild(document.createTextNode(' Loading all table data...'));
+  document.getElementById('area-dash-body').appendChild(loadDiv);
+  show('sc-area-dashboard');
+
+  callScript({ action:'getAllTableData', superPassword:G.superPass })
+  .then(function(r){
+    if(r.ok){
+      G.areaData = r.tableData;
+      buildAreaDashboard(r.tableData);
+    } else {
+      toast(r.error || 'Failed to load area data.', 'terr');
+      show('sc-super-admin');
+    }
+  }).catch(function(){ toast('Network error loading area data.','terr'); show('sc-super-admin'); });
+}
+
+function buildAreaDashboard(tableData){
+  var body = document.getElementById('area-dash-body');
+  body.innerHTML = '';
+
+  var FACETS_LIST = [
+    {id:'administration',  label:'Administration (Day to Day Table Working)', short:'Admin',     icon:'gear'},
+    {id:'communityService',label:'Community Service Projects',                short:'Comm.Svc',  icon:'hands'},
+    {id:'fellowship',      label:'Fellowship',                                short:'Fellowship',icon:'link'},
+    {id:'fundRaising',     label:'Fund Raising',                              short:'Fund',      icon:'money'},
+    {id:'hrd',             label:'HRD (LAPD)',                                short:'HRD',       icon:'bolt'},
+    {id:'imageBuilding',   label:'Image Building / Publicity',                short:'Image',     icon:'mega'},
+    {id:'extension',       label:'Extension',                                 short:'Extension', icon:'globe'}
+  ];
+
+  var tables = Object.keys(tableData).sort(function(a,b){ return +a - +b; });
+  var tablesWithData = tables.filter(function(t){ return tableData[t].responseCount > 0; });
+
+  // Update header pill
+  document.getElementById('area-resp-pill').textContent = tablesWithData.length + ' of ' + tables.length + ' tables responded';
+
+  if(!tablesWithData.length){
+    var emp = document.createElement('div'); emp.className = 'empty';
+    emp.innerHTML = '<span class="empty-icon">\uD83D\uDCED</span>No responses yet from any table.';
+    body.appendChild(emp); return;
+  }
+
+  // ── AREA OVERVIEW STAT CARDS ─────────────────────────────────────────
+  var totalResponses = tables.reduce(function(s,t){ return s + tableData[t].responseCount; }, 0);
+  var allScores = [];
+  tablesWithData.forEach(function(t){
+    FACETS_LIST.forEach(function(f){ allScores.push(tableData[t].avgScores[f.id]); });
+  });
+  var areaAvg = allScores.reduce(function(s,v){ return s+v; },0) / allScores.length;
+
+  var statsRow = document.createElement('div');
+  statsRow.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;';
+  [
+    { v: tables.length,    lbl: 'Total\nTables',    bg:'linear-gradient(135deg,#1A3C7A,#0F2550)', icon:'\uD83C\uDFAF' },
+    { v: totalResponses,   lbl: 'Total\nResponses', bg:'linear-gradient(135deg,#C8973A,#A07030)', icon:'\uD83D\uDCDD' },
+    { v: areaAvg.toFixed(1)+'/10', lbl: 'Area\nAvg Score', bg: areaAvg<=5?'linear-gradient(135deg,#DC2626,#B91C1C)':areaAvg<=8?'linear-gradient(135deg,#D97706,#B45309)':'linear-gradient(135deg,#16A34A,#15803D)', icon:'\u2B50' }
+  ].forEach(function(item){
+    var box = document.createElement('div');
+    box.style.cssText = 'background:'+item.bg+';border-radius:16px;padding:14px 10px;text-align:center;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.15);';
+    var ic  = document.createElement('div'); ic.style.cssText = 'font-size:20px;margin-bottom:4px;'; ic.textContent = item.icon;
+    var num = document.createElement('div'); num.style.cssText = 'font-family:Playfair Display,serif;font-size:1.9rem;font-weight:700;line-height:1;'; num.textContent = item.v;
+    var lbl = document.createElement('div'); lbl.style.cssText = 'font-size:10px;font-weight:700;opacity:.85;margin-top:4px;white-space:pre-line;line-height:1.3;letter-spacing:.5px;'; lbl.textContent = item.lbl;
+    box.appendChild(ic); box.appendChild(num); box.appendChild(lbl); statsRow.appendChild(box);
+  });
+  body.appendChild(statsRow);
+
+  // ── FACET HEATMAP — area average score per facet ─────────────────────
+  var hmCard = document.createElement('div'); hmCard.className = 'card'; hmCard.style.marginBottom = '14px';
+  var hmH = document.createElement('div'); hmH.className = 'sec-title'; hmH.textContent = 'Area Health Overview';
+  var hmT = document.createElement('div'); hmT.className = 'card-title'; hmT.style.marginBottom = '4px'; hmT.textContent = 'Average Score Across All Tables';
+  var hmS = document.createElement('div'); hmS.style.cssText = 'font-size:12px;color:var(--tl);margin-bottom:16px;'; hmS.textContent = 'Based on ' + totalResponses + ' responses from ' + tablesWithData.length + ' active tables';
+  hmCard.appendChild(hmH); hmCard.appendChild(hmT); hmCard.appendChild(hmS);
+
+  FACETS_LIST.forEach(function(f){
+    var fScores = tablesWithData.map(function(t){ return tableData[t].avgScores[f.id]; });
+    var fAvg    = fScores.reduce(function(s,v){ return s+v; },0) / fScores.length;
+    var fMin    = Math.min.apply(null, fScores);
+    var fMax    = Math.max.apply(null, fScores);
+    var status  = fAvg <= 5 ? 'Needs Improvement' : fAvg <= 8 ? 'Doing OK' : 'Doing Well';
+    var clr     = fAvg <= 5 ? '#DC2626' : fAvg <= 8 ? '#D97706' : '#16A34A';
+    var bc      = fAvg <= 5 ? 'bc' : fAvg <= 8 ? 'bm' : 'bg';
+
+    var row = document.createElement('div'); row.style.cssText = 'margin-bottom:14px;';
+    var top = document.createElement('div'); top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;';
+    var lft = document.createElement('div'); lft.style.cssText = 'display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--tx);';
+    var ic  = document.createElement('span'); ic.textContent = ICONS[f.icon] || f.icon;
+    var lb  = document.createElement('span'); lb.textContent = f.label;
+    lft.appendChild(ic); lft.appendChild(lb);
+    var rgt = document.createElement('div'); rgt.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    var avg = document.createElement('div'); avg.style.cssText = 'font-size:15px;font-weight:800;color:'+clr+';'; avg.textContent = fAvg.toFixed(1)+'/10';
+    var bdg = document.createElement('div'); bdg.className = 'pr-badge '+bc; bdg.textContent = status;
+    rgt.appendChild(avg); rgt.appendChild(bdg);
+    top.appendChild(lft); top.appendChild(rgt);
+
+    var track = document.createElement('div'); track.style.cssText = 'height:8px;background:var(--bd);border-radius:4px;overflow:hidden;';
+    var fill  = document.createElement('div');
+    fill.style.cssText = 'height:100%;border-radius:4px;background:'+clr+';transition:width .8s cubic-bezier(.4,0,.2,1);';
+    fill.style.width = '0%';
+    setTimeout(function(){ fill.style.width = Math.max(4, (fAvg/10)*100) + '%'; }, 200);
+    track.appendChild(fill);
+
+    var rangeRow = document.createElement('div'); rangeRow.style.cssText = 'display:flex;gap:12px;margin-top:4px;font-size:11px;color:var(--tl);';
+    rangeRow.innerHTML = '<span><b style="color:var(--tm)">Range:</b> '+fMin.toFixed(1)+' - '+fMax.toFixed(1)+'</span><span><b style="color:var(--tm)">Tables above 8:</b> '+fScores.filter(function(s){return s>8;}).length+' of '+fScores.length+'</span>';
+
+    row.appendChild(top); row.appendChild(track); row.appendChild(rangeRow);
+    hmCard.appendChild(row);
+  });
+  body.appendChild(hmCard);
+
+  // ── TABLE-BY-TABLE CARDS ─────────────────────────────────────────────
+  var tblTitle = document.createElement('div'); tblTitle.className = 'card';
+  var tH = document.createElement('div'); tH.className = 'sec-title'; tH.textContent = 'Table by Table';
+  var tT = document.createElement('div'); tT.className = 'card-title'; tT.style.marginBottom = '4px'; tT.textContent = 'Individual Table Scores';
+  var tS = document.createElement('div'); tS.style.cssText = 'font-size:12px;color:var(--tl);margin-bottom:0;'; tS.textContent = 'Click any table to view full details and download PDF report';
+  tblTitle.appendChild(tH); tblTitle.appendChild(tT); tblTitle.appendChild(tS);
+  body.appendChild(tblTitle);
+
+  tables.forEach(function(tbl){
+    var td = tableData[tbl];
+    var hasData = td.responseCount > 0;
+
+    var card = document.createElement('div'); card.className = 'card'; card.style.marginBottom = '10px';
+    if(hasData) { card.style.cursor = 'pointer'; card.style.transition = 'box-shadow .2s,transform .15s'; }
+
+    var topRow = document.createElement('div'); topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:' + (hasData?'14px':'0') + ';';
+    var leftDiv = document.createElement('div');
+    var tblNum  = document.createElement('div'); tblNum.style.cssText = 'font-size:16px;font-weight:800;color:var(--nv);';
+    tblNum.textContent = 'Table ' + tbl;
+    var tblName = document.createElement('div'); tblName.style.cssText = 'font-size:12px;color:var(--tm);margin-top:2px;'; tblName.textContent = td.name;
+    var respCt  = document.createElement('div'); respCt.style.cssText = 'font-size:11px;color:var(--tl);margin-top:2px;'; respCt.textContent = td.responseCount + ' response' + (td.responseCount!==1?'s':'');
+    leftDiv.appendChild(tblNum); leftDiv.appendChild(tblName); leftDiv.appendChild(respCt);
+    topRow.appendChild(leftDiv);
+
+    if(hasData){
+      // Overall score badge
+      var scores = FACETS_LIST.map(function(f){ return td.avgScores[f.id]; });
+      var avg = scores.reduce(function(s,v){ return s+v;},0)/scores.length;
+      var clr = avg<=5?'#DC2626':avg<=8?'#D97706':'#16A34A';
+      var scoreDiv = document.createElement('div'); scoreDiv.style.cssText = 'text-align:right;';
+      var scoreNum = document.createElement('div'); scoreNum.style.cssText = 'font-family:Playfair Display,serif;font-size:2rem;font-weight:700;color:'+clr+';line-height:1;'; scoreNum.textContent = avg.toFixed(1);
+      var scoreMax = document.createElement('span'); scoreMax.style.cssText = 'font-size:11px;color:var(--tl);font-family:Inter,sans-serif;font-weight:400;'; scoreMax.textContent = '/10';
+      scoreNum.appendChild(scoreMax);
+      var scoreLbl = document.createElement('div'); scoreLbl.style.cssText = 'font-size:10px;color:var(--tl);'; scoreLbl.textContent = 'avg score';
+      scoreDiv.appendChild(scoreNum); scoreDiv.appendChild(scoreLbl);
+      topRow.appendChild(scoreDiv);
+
+      // Mini bar chart
+      var miniChart = document.createElement('div'); miniChart.style.cssText = 'display:flex;gap:4px;align-items:flex-end;height:40px;margin-bottom:12px;';
+      FACETS_LIST.forEach(function(f){
+        var s = td.avgScores[f.id];
+        var barClr = s<=5?'#DC2626':s<=8?'#D97706':'#16A34A';
+        var barWrap = document.createElement('div'); barWrap.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;';
+        var bar = document.createElement('div'); bar.style.cssText = 'width:100%;background:'+barClr+';border-radius:3px 3px 0 0;transition:height .6s;height:0;';
+        var lbl = document.createElement('div'); lbl.style.cssText = 'font-size:8px;color:var(--tl);text-align:center;white-space:nowrap;overflow:hidden;width:100%;';
+        lbl.textContent = f.short.slice(0,4);
+        setTimeout(function(){ bar.style.height = Math.max(4, (s/10)*38) + 'px'; }, 300);
+        barWrap.appendChild(bar); barWrap.appendChild(lbl);
+        miniChart.appendChild(barWrap);
+      });
+
+      // PDF download button
+      var pdfBtn = document.createElement('button'); pdfBtn.className = 'btn btn-gd btn-sm'; pdfBtn.style.cssText = 'width:100%;margin-top:4px;';
+      pdfBtn.textContent = '\uD83D\uDCC4 Download Table ' + tbl + ' PDF Report';
+      (function(t, tdata){
+        pdfBtn.addEventListener('click', function(e){ e.stopPropagation(); exportAreaTablePDF(t, tdata, FACETS_LIST); });
+      })(tbl, td);
+
+      card.appendChild(topRow); card.appendChild(miniChart); card.appendChild(pdfBtn);
+
+      // Click whole card to see detail
+      card.addEventListener('mouseenter', function(){ this.style.boxShadow = 'var(--sh2)'; this.style.transform = 'translateY(-1px)'; });
+      card.addEventListener('mouseleave', function(){ this.style.boxShadow = 'var(--sh)'; this.style.transform = 'none'; });
+    } else {
+      var noData = document.createElement('div'); noData.style.cssText = 'font-size:12px;color:var(--tl);'; noData.textContent = 'No responses yet';
+      topRow.appendChild(noData);
+      card.appendChild(topRow);
+      card.style.opacity = '0.6';
+    }
+
+    body.appendChild(card);
+  });
+
+  var backBtn = document.createElement('button'); backBtn.className = 'btn btn-outline'; backBtn.textContent = '\u2190 Back to Admin Panel';
+  backBtn.addEventListener('click', function(){ show('sc-super-admin'); });
+  body.appendChild(backBtn);
+}
+
+function exportAreaTablePDF(tableNo, td, FACETS_LIST){
+  var script = document.createElement('script');
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  script.onload = function(){
+    toast('Building PDF for Table ' + tableNo + '...');
+    var jsPDF = window.jspdf.jsPDF;
+    var doc   = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+    var pw=210, ph=297, ml=18, mr=18, mt=22, cw=pw-ml-mr;
+    var y = mt;
+    var PAGE_BOTTOM = ph - 18;
+    function checkPage(n){ if(y+n>PAGE_BOTTOM){ doc.addPage(); y=mt; } }
+
+    var NAVY=[26,60,122], WHITE=[255,255,255], LIGHT=[238,244,252], MID=[78,101,128],
+        DARK=[26,43,69], RED=[220,38,38], ORANGE=[217,119,6], GREEN=[22,163,74];
+
+    // Header
+    doc.setFillColor(NAVY[0],NAVY[1],NAVY[2]); doc.rect(0,0,pw,44,'F');
+    doc.setTextColor(WHITE[0],WHITE[1],WHITE[2]);
+    doc.setFontSize(20); doc.setFont('helvetica','bold');
+    doc.text('VISION WHEEL REPORT — ' + (td.name || ('TABLE '+tableNo)), ml, y+6);
+    doc.setFontSize(10); doc.setFont('helvetica','normal');
+    doc.text('Area Chairman Report  |  ' + td.responseCount + ' Response' + (td.responseCount!==1?'s':'') + '  |  ' + new Date().toLocaleDateString('en-IN'), ml, y+16);
+    y = 52;
+
+    // Facet scores
+    doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]); doc.rect(0,y,pw,7,'F');
+    doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]); doc.setFontSize(9); doc.setFont('helvetica','bold');
+    doc.text('FACET ANALYSIS', ml, y+5); y += 11;
+
+    FACETS_LIST.forEach(function(f){
+      checkPage(10);
+      var scr    = td.avgScores[f.id];
+      var imp    = td.avgImp[f.id];
+      var status = scr<=5?'NEEDS IMPROVEMENT':scr<=8?'DOING OK':'DOING WELL';
+      var sc     = scr<=5?RED:scr<=8?ORANGE:GREEN;
+
+      doc.setFillColor(248,251,255); doc.roundedRect(ml,y,cw,9,2,2,'F');
+      doc.setFillColor(sc[0],sc[1],sc[2]); doc.rect(ml+cw-32,y,32,9,'F');
+      doc.setTextColor(DARK[0],DARK[1],DARK[2]); doc.setFontSize(8); doc.setFont('helvetica','normal');
+      doc.text(f.label, ml+3, y+6);
+      doc.text('Imp: '+imp.toFixed(1)+'%  Scr: '+scr.toFixed(1)+'/10', ml+cw-80, y+6);
+      doc.setTextColor(WHITE[0],WHITE[1],WHITE[2]); doc.setFont('helvetica','bold'); doc.setFontSize(7);
+      doc.text(status, ml+cw-16, y+6, {align:'center'});
+      y += 11;
+    });
+    y += 6;
+
+    // Suggestions
+    if(td.suggestions && td.suggestions.length){
+      checkPage(20);
+      doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]); doc.rect(0,y,pw,7,'F');
+      doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]); doc.setFontSize(9); doc.setFont('helvetica','bold');
+      doc.text('TABLER SUGGESTIONS (' + td.suggestions.length + ')', ml, y+5); y += 11;
+      td.suggestions.forEach(function(sg, idx){
+        checkPage(12);
+        doc.setFillColor(255,248,235); doc.roundedRect(ml,y,cw,10,2,2,'F');
+        doc.setTextColor(DARK[0],DARK[1],DARK[2]); doc.setFont('helvetica','normal'); doc.setFontSize(8);
+        var lines = doc.splitTextToSize((idx+1)+'. '+sg, cw-6);
+        doc.text(lines[0]||'', ml+3, y+6); y += 12;
+      });
+    }
+
+    // Footer
+    var tp = doc.internal.getNumberOfPages();
+    for(var pg=1;pg<=tp;pg++){
+      doc.setPage(pg);
+      doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]); doc.rect(0,ph-10,pw,10,'F');
+      doc.setTextColor(MID[0],MID[1],MID[2]); doc.setFontSize(7); doc.setFont('helvetica','normal');
+      doc.text('Round Table India  |  Vision Wheel  |  Area Chairman Report  |  Confidential', ml, ph-4);
+      doc.text('Page '+pg+' of '+tp, pw-ml, ph-4, {align:'right'});
+    }
+
+    doc.save('RTI-VisionWheel-Area-Table'+tableNo+'-'+today()+'.pdf');
+    toast('PDF for Table '+tableNo+' downloaded!', 'tok');
+  };
+  script.onerror = function(){ toast('Could not load PDF library.','terr'); };
+  document.head.appendChild(script);
+}
 
 function loadAreaDashboard(){
   var areaScreen = document.getElementById('sc-area-dashboard');

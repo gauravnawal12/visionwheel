@@ -832,8 +832,17 @@ function addAccount(){
 function savePw(tbl){
   var pw=(document.getElementById('ep-inp-'+tbl).value||'').trim();
   if(!pw||pw.length<6){toast('Min 6 characters.','terr');return;}
-  G.accounts[tbl].password=pw;
-  saveAccts(function(ok){if(ok){renderAccounts();toast('Password updated for Table '+tbl,'tok');}});
+  // Area admin override — uses superPassword to bypass current password check
+  callScript({action:'changeChairmanPw', tableNo:tbl, newPassword:pw, superPassword:G.superPass})
+  .then(function(r){
+    if(r.ok){
+      G.accounts[tbl].password=pw;
+      renderAccounts();
+      toast('Password overridden for Table '+tbl,'tok');
+    } else {
+      toast(r.error||'Failed to update password.','terr');
+    }
+  }).catch(function(){ toast('Network error.','terr'); });
 }
 function removeAcct(tbl){
   if(!confirm('Remove Table '+tbl+'? Data stays but they cannot log in.'))return;
@@ -1409,6 +1418,100 @@ function appendImportanceChart(body){
   body.appendChild(card);
 }
 
+function appendChangePwCard(body){
+  var card = document.createElement('div'); card.className='card'; card.style.marginBottom='14px';
+
+  var hdrRow = document.createElement('div'); hdrRow.style.cssText='display:flex;justify-content:space-between;align-items:center;cursor:pointer;';
+  var left   = document.createElement('div');
+  var h      = document.createElement('div'); h.className='sec-title'; h.style.marginBottom='0'; h.textContent='Account';
+  var t      = document.createElement('div'); t.className='card-title'; t.style.marginBottom='0'; t.textContent='Change Your Password';
+  left.appendChild(h); left.appendChild(t);
+  var chevron = document.createElement('div'); chevron.style.cssText='font-size:20px;color:var(--tl);transition:transform .3s;'; chevron.textContent='\u25BE';
+  hdrRow.appendChild(left); hdrRow.appendChild(chevron);
+
+  var body2 = document.createElement('div'); body2.style.cssText='margin-top:16px;display:none;';
+
+  var hint = document.createElement('div'); hint.style.cssText='font-size:12.5px;color:var(--tm);margin-bottom:16px;line-height:1.6;background:#EEF4FC;padding:12px;border-radius:10px;';
+  hint.textContent='You can change your chairman password here at any time. Your Area Admin can also reset it if needed.';
+  body2.appendChild(hint);
+
+  // Current password
+  var f1=document.createElement('div');f1.className='field';
+  var l1=document.createElement('label');l1.className='flbl';l1.textContent='Current Password';
+  var pw1w=document.createElement('div');pw1w.className='pw-wrap';
+  var pw1=document.createElement('input');pw1.id='ch-cur-pw';pw1.className='finp';pw1.type='password';pw1.placeholder='Your current password';
+  var eye1=document.createElement('button');eye1.type='button';eye1.className='pw-eye';eye1.textContent='Show';
+  eye1.addEventListener('click',function(){togglePw('ch-cur-pw',eye1);});
+  pw1w.appendChild(pw1);pw1w.appendChild(eye1);f1.appendChild(l1);f1.appendChild(pw1w);body2.appendChild(f1);
+
+  // New password
+  var f2=document.createElement('div');f2.className='field';
+  var l2=document.createElement('label');l2.className='flbl';l2.textContent='New Password';
+  var pw2w=document.createElement('div');pw2w.className='pw-wrap';
+  var pw2=document.createElement('input');pw2.id='ch-new-pw';pw2.className='finp';pw2.type='password';pw2.placeholder='Min 8 characters';
+  var eye2=document.createElement('button');eye2.type='button';eye2.className='pw-eye';eye2.textContent='Show';
+  eye2.addEventListener('click',function(){togglePw('ch-new-pw',eye2);});
+  var strDiv=document.createElement('div');strDiv.id='ch-pw-str';
+  pw2w.appendChild(pw2);pw2w.appendChild(eye2);f2.appendChild(l2);f2.appendChild(pw2w);f2.appendChild(strDiv);
+  pw2.addEventListener('input',function(){renderStr(this.value,'ch-pw-str');});
+  body2.appendChild(f2);
+
+  // Confirm
+  var f3=document.createElement('div');f3.className='field';f3.style.marginBottom='0';
+  var l3=document.createElement('label');l3.className='flbl';l3.textContent='Confirm New Password';
+  var pw3w=document.createElement('div');pw3w.className='pw-wrap';
+  var pw3=document.createElement('input');pw3.id='ch-conf-pw';pw3.className='finp';pw3.type='password';pw3.placeholder='Repeat new password';
+  var eye3=document.createElement('button');eye3.type='button';eye3.className='pw-eye';eye3.textContent='Show';
+  eye3.addEventListener('click',function(){togglePw('ch-conf-pw',eye3);});
+  pw3w.appendChild(pw3);pw3w.appendChild(eye3);f3.appendChild(l3);f3.appendChild(pw3w);body2.appendChild(f3);
+
+  var errDiv=document.createElement('div');errDiv.id='ch-pw-err';errDiv.style.cssText='font-size:12px;color:#DC2626;margin-top:8px;display:none;';body2.appendChild(errDiv);
+
+  var saveBtn=document.createElement('button');saveBtn.className='btn btn-primary';saveBtn.style.marginTop='16px';saveBtn.textContent='Update Password';
+  saveBtn.addEventListener('click',function(){
+    var cur  = document.getElementById('ch-cur-pw').value;
+    var nw   = document.getElementById('ch-new-pw').value;
+    var conf = document.getElementById('ch-conf-pw').value;
+    var errEl= document.getElementById('ch-pw-err');
+    errEl.style.display='none';
+    if(!cur){ errEl.textContent='Please enter your current password.'; errEl.style.display='block'; return; }
+    if(cur !== G.loggedPass){ errEl.textContent='Current password is incorrect.'; errEl.style.display='block'; return; }
+    if(nw.length<8){ errEl.textContent='New password must be at least 8 characters.'; errEl.style.display='block'; return; }
+    if(nw!==conf){ errEl.textContent='New passwords do not match.'; errEl.style.display='block'; return; }
+    saveBtn.innerHTML='<span class="spin"></span> Saving...'; saveBtn.disabled=true;
+    // Reuse saveAccounts: fetch accounts, update this table's pw, save back
+    callScript({action:'changeChairmanPw', tableNo:G.loggedTable, currentPassword:cur, newPassword:nw, selfChange:true})
+    .then(function(r){
+      saveBtn.innerHTML='Update Password'; saveBtn.disabled=false;
+      if(r.ok){
+        G.loggedPass=nw;
+        document.getElementById('ch-cur-pw').value='';
+        document.getElementById('ch-new-pw').value='';
+        document.getElementById('ch-conf-pw').value='';
+        document.getElementById('ch-pw-str').innerHTML='';
+        toast('Password updated successfully!','tok');
+      } else {
+        errEl.textContent=r.error||'Failed to update password.'; errEl.style.display='block';
+      }
+    }).catch(function(){
+      saveBtn.innerHTML='Update Password'; saveBtn.disabled=false;
+      errEl.textContent='Network error. Please try again.'; errEl.style.display='block';
+    });
+  });
+  body2.appendChild(saveBtn);
+
+  // Toggle expand/collapse
+  var isOpen=false;
+  hdrRow.addEventListener('click',function(){
+    isOpen=!isOpen;
+    body2.style.display=isOpen?'block':'none';
+    chevron.style.transform=isOpen?'rotate(-90deg)':'none';
+  });
+
+  card.appendChild(hdrRow); card.appendChild(body2);
+  body.appendChild(card);
+}
+
 function buildDashboard(){
   document.getElementById('dh-name').textContent = G.loggedName;
   document.getElementById('dh-year').textContent = 'Vision Wheel ' + new Date().getFullYear();
@@ -1486,6 +1589,8 @@ function buildDashboard(){
 
   // ── RAW TABLE ─────────────────────────────────────────────────────────
   appendTableCard(body);
+
+  appendChangePwCard(body);
 
   var backBtn = document.createElement('button');
   backBtn.className = 'btn btn-outline'; backBtn.textContent = 'Back to Survey';
@@ -1594,45 +1699,81 @@ function generateAI(){
   var btn  = card.querySelector('button');
   if(btn){ btn.innerHTML = '<span class="spin"></span> Generating report...'; btn.disabled = true; }
 
+  // Collect suggestions WITHOUT names (anonymised)
   var allSug = [];
   G.subs.forEach(function(s){ (s.suggestions||[]).forEach(function(t){ if(t) allSug.push(t); }); });
 
-  var facetLines = G.analysis.map(function(d, i){
-    var status = d.avgScr <= 5 ? 'NEEDS IMPROVEMENT' : d.avgScr <= 8 ? 'DOING OK' : 'DOING WELL';
-    return (i+1) + '. ' + d.label +
-      '\n   Avg Importance: ' + d.avgImp.toFixed(1) + '% (what tablers say matters most)' +
-      '\n   Avg Score: ' + d.avgScr.toFixed(1) + '/10 -> Status: ' + status;
+  // Full chart data for AI context
+  var needsImp = G.analysis.filter(function(d){ return d.avgScr<=5; });
+  var doingOk  = G.analysis.filter(function(d){ return d.avgScr>5&&d.avgScr<=8; });
+  var doingWel = G.analysis.filter(function(d){ return d.avgScr>8; });
+  var overallAvg = (G.analysis.reduce(function(s,d){ return s+d.avgScr; },0)/G.analysis.length).toFixed(1);
+
+  // Score frequency histogram data
+  var FACET_IDS=['administration','communityService','fellowship','fundRaising','hrd','imageBuilding','extension'];
+  var freq={};
+  for(var i=1;i<=10;i++) freq[i]=0;
+  G.subs.forEach(function(s){
+    FACET_IDS.forEach(function(fid){
+      var sc=Math.round(s.scores[fid]||0);
+      if(sc>=1&&sc<=10) freq[sc]++;
+    });
+  });
+  var totalVotes=Object.keys(freq).reduce(function(s,k){ return s+freq[k]; },0);
+  var histLine='Score distribution across all ratings: '+
+    Object.keys(freq).map(function(k){ return k+'/10 given '+freq[k]+' times ('+Math.round((freq[k]/totalVotes)*100)+'%)'; }).join(', ');
+
+  // Importance ranking
+  var impSorted=G.analysis.slice().sort(function(a,b){ return b.avgImp-a.avgImp; });
+  var impLine='Importance ranking (what tablers value most): '+impSorted.map(function(d,i){ return (i+1)+'. '+d.label+' ('+d.avgImp.toFixed(1)+'%)'; }).join(' | ');
+
+  var facetLines = G.analysis.map(function(d,i){
+    var status = d.avgScr<=5?'NEEDS IMPROVEMENT':d.avgScr<=8?'DOING OK':'DOING WELL';
+    return (i+1)+'. '+d.label+
+      '\n   Importance: '+d.avgImp.toFixed(1)+'% | Score: '+d.avgScr.toFixed(1)+'/10 | Status: '+status;
   }).join('\n');
 
+  // Anonymised suggestions — no names, no attribution
   var sugSection = '';
   if(allSug.length){
-    sugSection = '\n\nTABLER SUGGESTIONS (' + allSug.length + ' total):\n' +
-                 allSug.map(function(s,i){ return (i+1) + '. ' + s; }).join('\n');
+    sugSection = '\n\nANONYMISED TABLER SUGGESTIONS ('+allSug.length+' total — no names attached, summarise themes only):\n'+
+                 allSug.map(function(s,i){ return (i+1)+'. '+s; }).join('\n');
   }
 
   var prompt =
-    'You are writing a Vision Wheel executive report for the Chairman of ' + G.loggedName +
-    ' (Round Table India). ' + G.subs.length + ' tabler(s) responded.\n\n' +
-    'SCORING SCALE: 0-5 = Needs Improvement | 5-8 = Doing OK | 9-10 = Doing Well\n' +
-    'IMPORTANCE %: Average of what tablers said matters most to them. Higher = more critical.\n\n' +
-    'SURVEY RESULTS (sorted by Importance, then Score ascending within same importance):\n' +
-    facetLines + sugSection + '\n\n' +
-    'Write a comprehensive chairman report with these exact sections:\n\n' +
-    '1. EXECUTIVE OVERVIEW\n' +
-    'Summarise the overall health of the table in 3-4 sentences. Mention number of respondents and the general picture.\n\n' +
-    '2. AREAS NEEDING IMMEDIATE ATTENTION (Score 0-5)\n' +
-    'For each facet scoring 0-5: explain why the low score is concerning given its importance rating, and suggest 2 specific actions the chairman can take.\n\n' +
-    '3. AREAS TO WATCH (Score 5-8)\n' +
-    'For facets in the middle range: acknowledge the moderate performance and suggest how to push these to Doing Well.\n\n' +
-    '4. AREAS OF STRENGTH (Score 9-10)\n' +
-    'Acknowledge what the table is doing well and advise how to maintain and leverage these strengths.\n\n' +
-    '5. TABLER VOICE\n' +
-    'Analyse the suggestions submitted. Identify 2-3 recurring themes and what they signal about member sentiment.\n\n' +
-    '6. CHAIRMAN ACTION PLAN\n' +
-    'Write 5 specific, measurable actions the chairman should take this tabling year, directly tied to the scores above.\n\n' +
-    '7. CLOSING NOTE\n' +
-    'One motivating paragraph to the chairman.\n\n' +
-    'Rules: Plain text only. No markdown symbols. No bullet points inside sections. Use the actual numbers in your analysis. Be direct and specific.';
+    'You are writing a comprehensive Vision Wheel executive report for the Chairman of '+G.loggedName+
+    ' (Round Table India). '+G.subs.length+' tabler(s) responded.\n\n'+
+    'SCORING SCALE: 0-5 = Needs Improvement | 5-8 = Doing OK | 9-10 = Doing Well\n'+
+    'IMPORTANCE %: Average of what tablers said matters most. Higher = more critical to members.\n\n'+
+    'OVERALL TABLE SCORE: '+overallAvg+'/10\n'+
+    'STATUS SNAPSHOT: '+needsImp.length+' facets Needing Improvement | '+doingOk.length+' Doing OK | '+doingWel.length+' Doing Well\n\n'+
+    'SURVEY DATA (sorted by Importance, then Score ascending):\n'+facetLines+'\n\n'+
+    impLine+'\n\n'+
+    histLine+'\n'+
+    sugSection+'\n\n'+
+    'Write a comprehensive chairman report with these exact sections:\n\n'+
+    '1. EXECUTIVE OVERVIEW\n'+
+    'Summarise overall health in 3-4 sentences. Reference the overall score of '+overallAvg+'/10, the number of respondents, and the status snapshot.\n\n'+
+    '2. AREAS NEEDING IMMEDIATE ATTENTION (Score 0-5)\n'+
+    'For each facet scoring 0-5: explain why the low score is critical given its importance rating. Suggest 2 specific, actionable steps.\n\n'+
+    '3. AREAS TO WATCH (Score 5-8)\n'+
+    'For each middle-range facet: acknowledge moderate performance and give targeted advice to push it into Doing Well.\n\n'+
+    '4. AREAS OF STRENGTH (Score 9-10)\n'+
+    'Celebrate what the table is excelling at and advise how to sustain and leverage these strengths.\n\n'+
+    '5. IMPORTANCE INSIGHTS\n'+
+    'Based on the importance rankings, explain what your tablers collectively prioritise and whether the table performance aligns with what members care about most.\n\n'+
+    '6. TABLER VOICE — ANONYMOUS THEMES\n'+
+    'Read ALL the suggestions and write a cohesive 2-3 paragraph summary of the KEY THEMES that emerged. Do NOT mention any individual or quote directly. Do NOT list suggestions. Synthesise them into insights about what members are collectively asking for.\n\n'+
+    '7. CHAIRMAN ACTION PLAN\n'+
+    'Write 5 specific, measurable actions tied directly to the data above. Each action must reference the relevant facet and its score.\n\n'+
+    '8. CLOSING NOTE\n'+
+    'One motivating paragraph to the chairman.\n\n'+
+    'STRICT RULES:\n'+
+    '- Plain text only. No markdown symbols (*,#,-). No bullet points inside sections.\n'+
+    '- Do NOT mention any tabler by name anywhere in the report.\n'+
+    '- Do NOT quote individual suggestions verbatim.\n'+
+    '- Use the actual numbers (scores, percentages) in your analysis.\n'+
+    '- Be direct and specific.';
 
   callScript({ action:'generateAI', tableNo:G.loggedTable, password:G.loggedPass, prompt:prompt })
   .then(function(r){
@@ -1640,33 +1781,34 @@ function generateAI(){
       renderAIReport(r.text);
     } else {
       if(card){
-        card.innerHTML = '';
-        var h2 = document.createElement('div'); h2.className = 'sec-title'; h2.textContent = 'AI Executive Summary';
-        var errBox = document.createElement('div');
-        errBox.style.cssText = 'background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;';
-        var eTitle = document.createElement('div'); eTitle.style.cssText = 'font-weight:700;color:#DC2626;margin-bottom:8px;font-size:14px;'; eTitle.textContent = 'Could not generate summary';
-        var eMsg   = document.createElement('div'); eMsg.style.cssText   = 'font-size:13px;color:#991B1B;line-height:1.6;'; eMsg.textContent = r.error || 'Unknown error.';
-        var eHint  = document.createElement('div'); eHint.style.cssText  = 'font-size:12px;color:#991B1B;margin-top:8px;padding-top:8px;border-top:1px solid #FECACA;';
-        eHint.textContent = 'Make sure OPENROUTER_API_KEY is set in Code.gs and deployed as a new version.';
-        errBox.appendChild(eTitle); errBox.appendChild(eMsg); errBox.appendChild(eHint);
-        card.appendChild(h2); card.appendChild(errBox);
-        var retryBtn = document.createElement('button'); retryBtn.className = 'btn btn-primary'; retryBtn.style.marginTop = '12px'; retryBtn.textContent = 'Try Again';
-        retryBtn.addEventListener('click', generateAI); card.appendChild(retryBtn);
+        card.innerHTML='';
+        var h2=document.createElement('div');h2.className='sec-title';h2.textContent='AI Executive Summary';
+        var errBox=document.createElement('div');
+        errBox.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;';
+        var eTitle=document.createElement('div');eTitle.style.cssText='font-weight:700;color:#DC2626;margin-bottom:8px;font-size:14px;';eTitle.textContent='Could not generate summary';
+        var eMsg=document.createElement('div');eMsg.style.cssText='font-size:13px;color:#991B1B;line-height:1.6;';eMsg.textContent=r.error||'Unknown error.';
+        var eHint=document.createElement('div');eHint.style.cssText='font-size:12px;color:#991B1B;margin-top:8px;padding-top:8px;border-top:1px solid #FECACA;';
+        eHint.textContent='Make sure OPENROUTER_API_KEY is set in Code.gs and deployed as a new version.';
+        errBox.appendChild(eTitle);errBox.appendChild(eMsg);errBox.appendChild(eHint);
+        card.appendChild(h2);card.appendChild(errBox);
+        var retryBtn=document.createElement('button');retryBtn.className='btn btn-primary';retryBtn.style.marginTop='12px';retryBtn.textContent='Try Again';
+        retryBtn.addEventListener('click',generateAI);card.appendChild(retryBtn);
       }
     }
-  }).catch(function(err){
+  }).catch(function(){
     if(card){
-      card.innerHTML = '';
-      var h2 = document.createElement('div'); h2.className = 'sec-title'; h2.textContent = 'AI Executive Summary';
-      var errBox = document.createElement('div');
-      errBox.style.cssText = 'background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;font-size:13px;color:#991B1B;';
-      errBox.textContent = 'Network error. Check connection and try again.';
-      card.appendChild(h2); card.appendChild(errBox);
-      var retryBtn = document.createElement('button'); retryBtn.className = 'btn btn-primary'; retryBtn.style.marginTop = '12px'; retryBtn.textContent = 'Try Again';
-      retryBtn.addEventListener('click', generateAI); card.appendChild(retryBtn);
+      card.innerHTML='';
+      var h2=document.createElement('div');h2.className='sec-title';h2.textContent='AI Executive Summary';
+      var errBox=document.createElement('div');
+      errBox.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-radius:14px;padding:18px;margin-top:8px;font-size:13px;color:#991B1B;';
+      errBox.textContent='Network error. Check connection and try again.';
+      card.appendChild(h2);card.appendChild(errBox);
+      var retryBtn=document.createElement('button');retryBtn.className='btn btn-primary';retryBtn.style.marginTop='12px';retryBtn.textContent='Try Again';
+      retryBtn.addEventListener('click',generateAI);card.appendChild(retryBtn);
     }
   });
 }
+
 
 
 function renderAIReport(text){
@@ -1752,28 +1894,32 @@ function renderAIReport(text){
 
 
 function appendSugCard(body){
-  var hasSug=G.subs.some(function(s){return (s.suggestions||[]).some(function(x){return x;});});
-  if(!hasSug)return;
-  var card=document.createElement('div');card.className='card';
-  var h=document.createElement('div');h.className='sec-title';h.textContent='Tabler Suggestions';
-  var t=document.createElement('div');t.className='card-title';t.style.marginBottom='14px';t.textContent='What Your Tablers Are Saying';
-  card.appendChild(h);card.appendChild(t);
-  G.subs.forEach(function(s){
-    var sugs=(s.suggestions||[]).filter(function(x){return x;});
-    if(!sugs.length)return;
-    var dc=document.createElement('div');dc.className='sg-dc';
-    var nm=document.createElement('div');nm.className='sg-dc-nm';nm.textContent=s.name;
-    dc.appendChild(nm);
-    sugs.forEach(function(text,i){
-      var row=document.createElement('div');row.className='sg-dc-row';
-      var num=document.createElement('span');num.className='sg-dc-n';num.textContent=i+1;
-      var txt=document.createElement('span');txt.textContent=text;
-      row.appendChild(num);row.appendChild(txt);dc.appendChild(row);
-    });
-    card.appendChild(dc);
+  var allSug2=[];
+  G.subs.forEach(function(s){ (s.suggestions||[]).forEach(function(t){ if(t) allSug2.push(t); }); });
+  if(!allSug2.length) return;
+
+  var card=document.createElement('div'); card.className='card'; card.style.marginBottom='14px';
+  var h=document.createElement('div'); h.className='sec-title'; h.textContent='Tabler Suggestions';
+  var t=document.createElement('div'); t.className='card-title'; t.style.marginBottom='4px'; t.textContent='Anonymous Suggestions';
+  var sub=document.createElement('div'); sub.style.cssText='font-size:12px;color:var(--tl);margin-bottom:14px;background:#EEF4FC;padding:10px 12px;border-radius:9px;line-height:1.5;';
+  sub.textContent=allSug2.length+' suggestion'+(allSug2.length!==1?'s':'')+' collected. Names removed to protect tabler privacy.';
+  card.appendChild(h); card.appendChild(t); card.appendChild(sub);
+
+  // Show all suggestions anonymously, numbered
+  allSug2.forEach(function(text, i){
+    var row=document.createElement('div');
+    row.style.cssText='display:flex;gap:10px;align-items:flex-start;padding:11px 14px;background:#FAFCFF;border:1.5px solid var(--bd);border-radius:10px;margin-bottom:8px;';
+    var num=document.createElement('div');
+    num.style.cssText='width:22px;height:22px;border-radius:50%;background:var(--gdl);color:var(--gd);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;';
+    num.textContent=i+1;
+    var txt=document.createElement('div'); txt.style.cssText='font-size:13px;color:var(--tx);line-height:1.6;'; txt.textContent=text;
+    row.appendChild(num); row.appendChild(txt);
+    card.appendChild(row);
   });
+
   body.appendChild(card);
 }
+
 
 function appendTableCard(body){
   var card=document.createElement('div');card.className='card';
@@ -2006,21 +2152,49 @@ function exportPDF(aiTextOverride){
     });
     y += 6;
 
-    // ── Suggestions ──
-    var allSug = [];
-    G.subs.forEach(function(s){ (s.suggestions||[]).forEach(function(t){ if(t) allSug.push({name:s.name, text:t}); }); });
-    if(allSug.length){
+    // ── Chart summary block ──
+    checkPage(30);
+    sectionTitle('Score Snapshot');
+    var needsI2=analysis.filter(function(d){return d.avgScr<=5;}).length;
+    var doingO2=analysis.filter(function(d){return d.avgScr>5&&d.avgScr<=8;}).length;
+    var doingW2=analysis.filter(function(d){return d.avgScr>8;}).length;
+    var ovAvg2 =(analysis.reduce(function(s,d){return s+d.avgScr;},0)/analysis.length).toFixed(1);
+    doc.setFillColor(LIGHT[0],LIGHT[1],LIGHT[2]); doc.roundedRect(ml,y,cw,20,3,3,'F');
+    doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]); doc.setFontSize(9); doc.setFont('helvetica','bold');
+    doc.text('Overall Avg: '+ovAvg2+'/10', ml+6, y+8);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+    doc.text(needsI2+' Needs Improvement  |  '+doingO2+' Doing OK  |  '+doingW2+' Doing Well', ml+6, y+15);
+    y+=26;
+
+    // Importance ranking in PDF
+    var impSorted2=analysis.slice().sort(function(a,b){return b.avgImp-a.avgImp;});
+    sectionTitle('Importance Ranking (What Tablers Value Most)');
+    impSorted2.forEach(function(d,i){
+      checkPage(8);
+      var bw2=Math.max(4,(d.avgImp/impSorted2[0].avgImp)*80);
+      doc.setFillColor(NAVY[0],NAVY[1],NAVY[2]);
+      doc.roundedRect(ml,y,bw2,5,1,1,'F');
+      doc.setTextColor(DARK[0],DARK[1],DARK[2]); doc.setFontSize(7); doc.setFont('helvetica','normal');
+      doc.text((i+1)+'. '+d.label+' — '+d.avgImp.toFixed(1)+'%', ml+bw2+4, y+4);
+      y+=8;
+    });
+    y+=4;
+
+    // ── Suggestions — ANONYMISED, no names ──
+    var allSugAnon = [];
+    G.subs.forEach(function(s){ (s.suggestions||[]).forEach(function(t){ if(t) allSugAnon.push(t); }); });
+    if(allSugAnon.length){
       checkPage(20);
-      sectionTitle('Tabler Suggestions');
-      allSug.forEach(function(sg){
+      sectionTitle('Anonymous Tabler Suggestions ('+allSugAnon.length+' total — names removed)');
+      allSugAnon.forEach(function(txt2, idx2){
         checkPage(14);
-        doc.setFillColor(255,248,235); doc.roundedRect(ml, y, cw, 11, 2, 2, 'F');
+        doc.setFillColor(255,248,235); doc.roundedRect(ml, y, cw, 10, 2, 2, 'F');
         doc.setTextColor(NAVY[0],NAVY[1],NAVY[2]); doc.setFontSize(7); doc.setFont('helvetica','bold');
-        doc.text(sg.name, ml+4, y+5);
+        doc.text('#'+(idx2+1), ml+3, y+6);
         doc.setFont('helvetica','normal'); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-        var lines = doc.splitTextToSize(sg.text, cw-8);
-        doc.text(lines[0]||'', ml+4, y+9);
-        y += 13;
+        var pdfLines = doc.splitTextToSize(txt2, cw-14);
+        doc.text(pdfLines[0]||'', ml+12, y+6);
+        y += 12;
       });
       y += 4;
     }
